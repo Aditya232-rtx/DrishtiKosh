@@ -57,11 +57,15 @@ const Signup = () => {
         description: "Welcome to DrishtiKosh. Let's start learning!",
       });
       
+      // Store user type in localStorage for now (will use proper auth later)
+      localStorage.setItem("userType", formData.disability);
+      
       // Navigate based on disability type
       if (formData.disability === "blind") {
         navigate("/blind");
       } else {
-        navigate("/learn");
+        // ADHD and Deaf users go to dashboard first
+        navigate("/dashboard");
       }
     }, 1500);
   };

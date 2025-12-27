@@ -86,17 +86,17 @@ const BlindMode = () => {
       {/* Main Content */}
       <main className="flex-1 flex flex-col items-center justify-center p-8">
         {/* Microphone Button with Ripple Effect */}
-        <div className="relative mb-12">
-          {/* Ripple Effects */}
+        <div className="relative mb-12 flex items-center justify-center">
+          {/* Ripple Effects - centered around the button */}
           {isListening && (
             <>
-              <div className="absolute inset-0 w-48 h-48 -translate-x-1/2 -translate-y-1/2 left-1/2 top-1/2 rounded-full bg-primary/20 animate-pulse-ring" />
+              <div className="absolute w-56 h-56 rounded-full bg-primary/20 animate-pulse-ring" />
               <div
-                className="absolute inset-0 w-48 h-48 -translate-x-1/2 -translate-y-1/2 left-1/2 top-1/2 rounded-full bg-primary/15 animate-pulse-ring"
+                className="absolute w-56 h-56 rounded-full bg-primary/15 animate-pulse-ring"
                 style={{ animationDelay: "0.3s" }}
               />
               <div
-                className="absolute inset-0 w-48 h-48 -translate-x-1/2 -translate-y-1/2 left-1/2 top-1/2 rounded-full bg-primary/10 animate-pulse-ring"
+                className="absolute w-56 h-56 rounded-full bg-primary/10 animate-pulse-ring"
                 style={{ animationDelay: "0.6s" }}
               />
             </>
@@ -105,7 +105,7 @@ const BlindMode = () => {
           {/* Main Button */}
           <button
             onClick={toggleListening}
-            className={`relative w-32 h-32 rounded-full flex items-center justify-center transition-all duration-300 shadow-xl ${
+            className={`relative z-10 w-32 h-32 rounded-full flex items-center justify-center transition-all duration-300 shadow-xl ${
               isListening
                 ? "bg-destructive scale-110"
                 : "bg-primary hover:bg-primary/90 hover:scale-105"

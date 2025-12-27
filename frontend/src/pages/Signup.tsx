@@ -56,10 +56,12 @@ const Signup = () => {
         title: "Account created!",
         description: "Welcome to DrishtiKosh. Let's start learning!",
       });
-      
+
       // Store user type in localStorage for now (will use proper auth later)
       localStorage.setItem("userType", formData.disability);
-      
+      localStorage.setItem("userName", formData.name);
+      localStorage.setItem("userEmail", formData.email);
+
       // Navigate based on disability type
       if (formData.disability === "blind") {
         navigate("/blind");

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import Logo from "@/components/Logo";
@@ -8,6 +8,27 @@ const BlindMode = () => {
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [aiResponse, setAiResponse] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      // Logic to handle the file upload
+      console.log("File selected:", file.name);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "ai",
+          content: `I see you've uploaded ${file.name}. I'm analyzing it now.`,
+        },
+      ]);
+    }
+  };
+
   const [messages, setMessages] = useState<
     { role: "user" | "ai"; content: string }[]
   >([
@@ -73,9 +94,21 @@ const BlindMode = () => {
             <Logo />
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="icon" aria-label="Upload file">
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label="Upload file"
+              onClick={handleUploadClick}
+            >
               <Upload className="w-4 h-4" />
             </Button>
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileChange}
+              className="hidden"
+              accept="image/*,.pdf,.doc,.docx"
+            />
             <Button variant="outline" size="icon" aria-label="Audio settings">
               <Volume2 className="w-4 h-4" />
             </Button>
@@ -105,11 +138,10 @@ const BlindMode = () => {
           {/* Main Button */}
           <button
             onClick={toggleListening}
-            className={`relative z-10 w-32 h-32 rounded-full flex items-center justify-center transition-all duration-300 shadow-xl ${
-              isListening
-                ? "bg-destructive scale-110"
-                : "bg-primary hover:bg-primary/90 hover:scale-105"
-            }`}
+            className={`relative z-10 w-32 h-32 rounded-full flex items-center justify-center transition-all duration-300 shadow-xl ${isListening
+              ? "bg-destructive scale-110"
+              : "bg-primary hover:bg-primary/90 hover:scale-105"
+              }`}
             aria-label={isListening ? "Stop listening" : "Start listening"}
             aria-pressed={isListening}
           >
@@ -146,16 +178,14 @@ const BlindMode = () => {
           {messages.map((message, index) => (
             <div
               key={index}
-              className={`flex ${
-                message.role === "user" ? "justify-end" : "justify-start"
-              } animate-fade-in`}
+              className={`flex ${message.role === "user" ? "justify-end" : "justify-start"
+                } animate-fade-in`}
             >
               <div
-                className={`max-w-[80%] p-4 rounded-2xl ${
-                  message.role === "user"
-                    ? "bg-primary text-primary-foreground rounded-br-md"
-                    : "bg-card border border-border text-foreground rounded-bl-md"
-                }`}
+                className={`max-w-[80%] p-4 rounded-2xl ${message.role === "user"
+                  ? "bg-primary text-primary-foreground rounded-br-md"
+                  : "bg-card border border-border text-foreground rounded-bl-md"
+                  }`}
               >
                 <p className="text-sm font-medium mb-1">
                   {message.role === "user" ? "You" : "AI Assistant"}

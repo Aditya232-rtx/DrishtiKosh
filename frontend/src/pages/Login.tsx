@@ -26,10 +26,11 @@ const Login = () => {
         title: "Welcome back!",
         description: "You have successfully logged in.",
       });
-      
+
       // Get user type from localStorage (will use proper auth later)
+      localStorage.setItem("userName", formData.username);
       const userType = localStorage.getItem("userType");
-      
+
       // Navigate based on user type
       if (userType === "blind") {
         navigate("/blind");

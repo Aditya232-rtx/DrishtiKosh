@@ -19,18 +19,11 @@ const Logo = ({ size = "md", showText = true }: LogoProps) => {
   };
 
   return (
-    <div className="flex items-center gap-2">
-      <img 
-        src={logoIcon} 
-        alt="DrishtiKosh Logo" 
-        className={`${sizeClasses[size]} w-auto`}
-      />
-      {showText && (
-        <span className={`${textSizeClasses[size]} font-bold text-foreground`}>
-          drishtikosh
-        </span>
-      )}
-    </div>
+    <img 
+      src={logoIcon} 
+      alt="DrishtiKosh Logo" 
+      className={`${sizeClasses[size]} w-auto`}
+    />
   );
 };
 

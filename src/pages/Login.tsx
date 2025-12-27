@@ -26,7 +26,17 @@ const Login = () => {
         title: "Welcome back!",
         description: "You have successfully logged in.",
       });
-      navigate("/dashboard");
+      
+      // Get user type from localStorage (will use proper auth later)
+      const userType = localStorage.getItem("userType");
+      
+      // Navigate based on user type
+      if (userType === "blind") {
+        navigate("/blind");
+      } else {
+        // ADHD and Deaf users go to dashboard first
+        navigate("/dashboard");
+      }
     }, 1500);
   };
 

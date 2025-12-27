@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import Logo from "@/components/Logo";
@@ -8,16 +8,35 @@ import {
   History,
   Search,
   MessageSquare,
-  ChevronRight,
-  Eye,
-  Ear,
-  Brain,
   LogOut,
 } from "lucide-react";
 
 const Dashboard = () => {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
+  const [userType, setUserType] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Get user type from localStorage
+    const storedUserType = localStorage.getItem("userType");
+    setUserType(storedUserType);
+  }, []);
+
+  const handleNewSession = () => {
+    // Navigate to learn page with user's mode
+    if (userType === "deaf") {
+      navigate("/learn?mode=deaf");
+    } else if (userType === "adhd") {
+      navigate("/learn?mode=adhd");
+    } else {
+      navigate("/learn");
+    }
+  };
+
+  const handleSignOut = () => {
+    localStorage.removeItem("userType");
+    navigate("/");
+  };
 
   // Mock chat history
   const chatHistory = [
@@ -41,30 +60,6 @@ const Dashboard = () => {
     },
   ];
 
-  const learningModes = [
-    {
-      id: "blind",
-      title: "Voice Learning",
-      description: "Voice-operated interface for visually impaired",
-      icon: Eye,
-      path: "/blind",
-    },
-    {
-      id: "deaf",
-      title: "Visual Learning",
-      description: "Caption-based learning for hearing impaired",
-      icon: Ear,
-      path: "/learn?mode=deaf",
-    },
-    {
-      id: "adhd",
-      title: "Focus Learning",
-      description: "Enhanced focus mode for ADHD learners",
-      icon: Brain,
-      path: "/learn?mode=adhd",
-    },
-  ];
-
   return (
     <div className="min-h-screen bg-background flex">
       {/* Sidebar */}
@@ -78,7 +73,7 @@ const Dashboard = () => {
           <Button
             variant="hero"
             className="w-full justify-start gap-2"
-            onClick={() => navigate("/learn")}
+            onClick={handleNewSession}
           >
             <Plus className="w-4 h-4" />
             New Learning Session
@@ -131,7 +126,11 @@ const Dashboard = () => {
 
         {/* User Actions */}
         <div className="p-4 border-t border-border">
-          <Button variant="ghost" className="w-full justify-start gap-2 text-muted-foreground">
+          <Button 
+            variant="ghost" 
+            className="w-full justify-start gap-2 text-muted-foreground"
+            onClick={handleSignOut}
+          >
             <LogOut className="w-4 h-4" />
             Sign Out
           </Button>
@@ -147,37 +146,38 @@ const Dashboard = () => {
               Welcome Back! 👋
             </h1>
             <p className="text-muted-foreground">
-              Choose a learning mode or continue where you left off
+              Continue where you left off or start a new learning session
             </p>
           </div>
 
-          {/* Learning Modes */}
+          {/* Recent Sessions */}
           <div className="mb-12">
             <h2 className="text-lg font-semibold text-foreground mb-4">
-              Learning Modes
+              Recent Sessions
             </h2>
-            <div className="grid md:grid-cols-3 gap-4">
-              {learningModes.map((mode, index) => (
-                <Link
-                  key={mode.id}
-                  to={mode.path}
-                  className="bg-card p-6 rounded-2xl border border-border hover:border-primary/50 hover:shadow-lg transition-all group animate-fade-in"
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {chatHistory.map((chat, index) => (
+                <button
+                  key={chat.id}
+                  onClick={handleNewSession}
+                  className="bg-card p-6 rounded-2xl border border-border hover:border-primary/50 hover:shadow-lg transition-all text-left animate-fade-in"
                   style={{ animationDelay: `${index * 0.1}s` }}
                 >
-                  <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center mb-4 group-hover:bg-primary/20 transition-colors">
-                    <mode.icon className="w-6 h-6 text-primary" />
+                  <div className="flex items-start gap-3">
+                    <MessageSquare className="w-5 h-5 text-primary mt-0.5" />
+                    <div>
+                      <h3 className="font-semibold text-foreground mb-1">
+                        {chat.title}
+                      </h3>
+                      <p className="text-sm text-muted-foreground mb-2">
+                        {chat.preview}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {chat.date}
+                      </p>
+                    </div>
                   </div>
-                  <h3 className="font-semibold text-foreground mb-1">
-                    {mode.title}
-                  </h3>
-                  <p className="text-sm text-muted-foreground mb-4">
-                    {mode.description}
-                  </p>
-                  <div className="flex items-center text-primary text-sm font-medium">
-                    Start Learning
-                    <ChevronRight className="w-4 h-4 ml-1 group-hover:translate-x-1 transition-transform" />
-                  </div>
-                </Link>
+                </button>
               ))}
             </div>
           </div>
@@ -195,7 +195,7 @@ const Dashboard = () => {
                 placeholder="What would you like to learn today?"
                 className="h-12 text-base"
               />
-              <Button variant="hero" size="lg">
+              <Button variant="hero" size="lg" onClick={handleNewSession}>
                 <Plus className="w-5 h-5 mr-2" />
                 Start
               </Button>

@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import api from "../lib/api";
+import { auth } from "../lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,26 +21,40 @@ const Login = () => {
     e.preventDefault();
     setIsLoading(true);
 
-    // Simulate login - replace with actual API call
-    setTimeout(() => {
-      setIsLoading(false);
+    try {
+      // Call backend login API
+      const response = await api.post('/api/auth/login', {
+        username: formData.username,
+        password: formData.password
+      });
+
+      // Store JWT token and user ID - AND User Details for Sidebar
+      auth.setToken(response.data.token, response.data.id);
+      localStorage.setItem("full_name", response.data.full_name);
+      localStorage.setItem("email", response.data.email);
+      localStorage.setItem("learning_preference", response.data.learning_preference || "student");
+
       toast({
         title: "Welcome back!",
         description: "You have successfully logged in.",
       });
 
-      // Get user type from localStorage (will use proper auth later)
-      localStorage.setItem("userName", formData.username);
-      const userType = localStorage.getItem("userType");
-
-      // Navigate based on user type
-      if (userType === "blind") {
+      // Conditional Navigation based on User Preference
+      if (response.data.learning_preference === "blind") {
         navigate("/blind");
       } else {
-        // ADHD and Deaf users go to dashboard first
         navigate("/dashboard");
       }
-    }, 1500);
+    } catch (error: any) {
+      console.error('Login error:', error);
+      toast({
+        title: "Login Failed",
+        description: error.response?.data?.detail || 'Please check your credentials.',
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -67,11 +83,11 @@ const Login = () => {
 
           <form onSubmit={handleSubmit} className="mt-8 space-y-6">
             <div className="space-y-2">
-              <Label htmlFor="username">Username</Label>
+              <Label htmlFor="username">Username or Email</Label>
               <Input
                 id="username"
                 type="text"
-                placeholder="Enter your username"
+                placeholder="Enter your username or email"
                 value={formData.username}
                 onChange={(e) =>
                   setFormData({ ...formData, username: e.target.value })

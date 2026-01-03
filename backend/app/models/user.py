@@ -1,0 +1,28 @@
+from sqlalchemy import Column, String, DateTime, Boolean, Enum as SQLEnum
+from sqlalchemy.dialects.postgresql import UUID
+from app.core.database import Base
+from datetime import datetime
+import uuid
+import enum
+
+class LearningPreference(enum.Enum):
+    blind = "blind"
+    deaf = "deaf"
+    adhd = "adhd"
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    username = Column(String, unique=True, index=True)
+    email = Column(String, unique=True, index=True)
+    hashed_password = Column(String)
+    full_name = Column(String)
+    field_of_interest = Column(String, nullable=True)
+    learning_preference = Column(String, nullable=True)  # "blind", "deaf", "adhd"
+    
+    is_active = Column(Boolean, default=True)
+    is_verified = Column(Boolean, default=False)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_login = Column(DateTime, nullable=True)

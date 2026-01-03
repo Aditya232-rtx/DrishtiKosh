@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import api from "../lib/api";
+import { auth } from "../lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -49,18 +51,26 @@ const Signup = () => {
 
     setIsLoading(true);
 
-    // Simulate signup - replace with actual API call
-    setTimeout(() => {
-      setIsLoading(false);
+    try {
+      // Call backend signup API
+      // NOTE: 'api' and 'auth' are assumed to be imported or defined elsewhere.
+      // If not, you'll need to add their imports (e.g., import api from "@/lib/api"; import auth from "@/lib/auth";)
+      const response = await api.post('/api/auth/signup', {
+        username: formData.name.toLowerCase().replace(/\s+/g, ''),  // Create username from name
+        email: formData.email,
+        password: formData.password,
+        full_name: formData.name,
+        field_of_interest: formData.fieldOfInterest, // Corrected from formData.interests
+        learning_preference: formData.disability
+      });
+
+      // Store JWT token and user ID
+      auth.setToken(response.data.token, response.data.id);
+
       toast({
         title: "Account created!",
         description: "Welcome to DrishtiKosh. Let's start learning!",
       });
-
-      // Store user type in localStorage for now (will use proper auth later)
-      localStorage.setItem("userType", formData.disability);
-      localStorage.setItem("userName", formData.name);
-      localStorage.setItem("userEmail", formData.email);
 
       // Navigate based on disability type
       if (formData.disability === "blind") {
@@ -69,7 +79,16 @@ const Signup = () => {
         // ADHD and Deaf users go to dashboard first
         navigate("/dashboard");
       }
-    }, 1500);
+    } catch (error: any) {
+      console.error('Signup error:', error);
+      toast({
+        title: "Signup failed",
+        description: error.response?.data?.detail || 'Please try again.',
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const disabilityOptions = [
@@ -88,7 +107,7 @@ const Signup = () => {
               <div
                 key={option.value}
                 className="bg-background/80 backdrop-blur-sm p-6 rounded-2xl shadow-lg border border-border animate-slide-in-left"
-                style={{ animationDelay: `${index * 0.2}s` }}
+                style={{ animationDelay: `${index * 0.2} s` }}
               >
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center">

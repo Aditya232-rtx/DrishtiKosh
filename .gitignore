@@ -1,5 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual Environments
+venv/
+env/
+ENV/
+.venv/
+backend/venv/
+services/open-notebook/.venv/
+
 # Logs
-logs
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -7,9 +29,10 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
+# Node
+node_modules/
+dist/
+dist-ssr/
 *.local
 
 # Editor directories and files
@@ -22,3 +45,31 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Secrets & Credentials
+backend/secrets/
+.env
+*.key
+*.pem
+
+# Local Models & Data (Large files)
+backend/models_data/
+backend/test_outputs/
+backend/outputs/
+backend/history.json
+
+# Services (Open Notebook - separate repo)
+services/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+surreal_data/
+
+# Test files
+test_*.py
+*_test.py
+backend/check_voices.py
+backend/verify_gcp_tts.py
+backend/test_inputs/

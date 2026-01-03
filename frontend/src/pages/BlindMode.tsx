@@ -3,80 +3,237 @@ import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import Logo from "@/components/Logo";
 import { ArrowLeft, Mic, MicOff, Upload, Volume2 } from "lucide-react";
+import api from "@/lib/api";
+import { auth } from "../lib/auth";
 
 const BlindMode = () => {
+  const userId = auth.getUserId(); // Get authenticated user ID
   const [isListening, setIsListening] = useState(false);
+  // Status for logic, but we'll stick to isListening for UI mostly or map it
+  const [status, setStatus] = useState<"idle" | "listening" | "processing" | "speaking">("idle");
   const [transcript, setTranscript] = useState("");
   const [aiResponse, setAiResponse] = useState("");
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
 
-  const handleUploadClick = () => {
-    fileInputRef.current?.click();
-  };
-
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      // Logic to handle the file upload
-      console.log("File selected:", file.name);
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "ai",
-          content: `I see you've uploaded ${file.name}. I'm analyzing it now.`,
-        },
-      ]);
-    }
-  };
-
+  // Restore Chat History state
   const [messages, setMessages] = useState<
     { role: "user" | "ai"; content: string }[]
   >([
     {
       role: "ai",
       content:
-        "Hello! Welcome to DrishtiKosh. I'm your AI learning assistant. What language would you prefer to communicate in?",
+        "Hello! Welcome back to DrishtiKosh. I'm ready to help you. Let me know your preferred language. Press Space or tap the microphone to speak.",
     },
   ]);
 
-  // Simulate voice interaction
-  const toggleListening = useCallback(() => {
-    if (isListening) {
-      setIsListening(false);
-      // Process transcript
-      if (transcript) {
-        setMessages((prev) => [...prev, { role: "user", content: transcript }]);
-        // Simulate AI response
-        setTimeout(() => {
-          setMessages((prev) => [
-            ...prev,
-            {
-              role: "ai",
-              content: `I understand you said "${transcript}". Let me help you with that. I can explain any topic you'd like to learn about. Just speak your question!`,
-            },
-          ]);
-          setAiResponse(
-            `I understand you said "${transcript}". Let me help you with that.`
-          );
-        }, 1000);
-        setTranscript("");
-      }
-    } else {
-      setIsListening(true);
-      // Simulate speech recognition
-      setTimeout(() => {
-        setTranscript("Tell me about the solar system");
-      }, 2000);
-    }
-  }, [isListening, transcript]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
-  // Auto-read AI responses
-  useEffect(() => {
-    if (aiResponse) {
-      // In production, this would use Web Speech API or TTS
-      console.log("Speaking:", aiResponse);
+  // --- Logic: Audio Cues (New Feature, Hidden from UI) ---
+  const playCue = (type: "start" | "stop" | "processing") => {
+    try {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      const now = ctx.currentTime;
+
+      if (type === "start") { // High Beep
+        osc.frequency.setValueAtTime(440, now);
+        osc.frequency.exponentialRampToValueAtTime(880, now + 0.1);
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+        osc.start(now);
+        osc.stop(now + 0.1);
+      } else if (type === "stop") { // Low Beep
+        osc.frequency.setValueAtTime(880, now);
+        osc.frequency.exponentialRampToValueAtTime(440, now + 0.1);
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+        osc.start(now);
+        osc.stop(now + 0.1);
+      } else { // Processing Hum
+        osc.frequency.setValueAtTime(220, now);
+        gain.gain.setValueAtTime(0.05, now);
+        gain.gain.linearRampToValueAtTime(0, now + 0.2);
+        osc.start(now);
+        osc.stop(now + 0.2);
+      }
+    } catch (e) {
+      console.error("Audio Context Error", e);
     }
-  }, [aiResponse]);
+  };
+
+  const handleUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      console.log("File selected:", file.name);
+      setMessages((prev) => [...prev, { role: "ai", content: `Analyzing ${file.name}...` }]);
+      setStatus("processing");
+      playCue("processing");
+
+      const formData = new FormData();
+      formData.append('image', file);
+      if (userId) formData.append('user_id', userId); // Add authenticated user
+
+      try {
+        const response = await api.post('/api/blind/interact', formData);
+        const data = response.data;
+
+        if (data.ai_response) {
+          setMessages((prev) => [...prev, { role: "ai", content: data.ai_response }]);
+          setAiResponse(data.ai_response);
+        }
+
+        if (data.audio_base64) {
+          setStatus("speaking");
+          const audioUrl = `data:audio/wav;base64,${data.audio_base64}`;
+          if (audioRef.current) {
+            audioRef.current.src = audioUrl;
+            audioRef.current.play();
+            setIsPlaying(true);
+          }
+        } else {
+          setStatus("idle");
+        }
+      } catch (err) {
+        console.error("Analysis failed", err);
+        setMessages((prev) => [...prev, { role: "ai", content: "Sorry, I encountered an error." }]);
+        setStatus("idle");
+      }
+    }
+  };
+
+  // Logic: Process Audio
+  const processAudio = async (audioBlob: Blob) => {
+    console.log(`[DEBUG] processAudio called with blob: ${audioBlob.size} bytes`);
+
+    setMessages((prev) => [...prev, { role: "ai", content: "Thinking..." }]);
+    setStatus("processing");
+    playCue("processing");
+
+    const formData = new FormData();
+    formData.append("audio", audioBlob, "voice_input.webm");
+    if (userId) formData.append("user_id", userId); // Add authenticated user
+
+    console.log(`[DEBUG] FormData created. Audio field value:`, formData.get('audio'));
+    console.log(`[DEBUG] Sending to /api/blind/interact...`);
+
+    try {
+      const response = await api.post("/api/blind/interact", formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      const data = response.data;
+
+      console.log(`[DEBUG] Response received:`, data);
+
+      setMessages(prev => prev.filter(msg => msg.content !== "Thinking..."));
+
+      const userText = data.user_transcript || "(No speech detected)";
+      setMessages((prev) => [...prev, { role: "user", content: userText }]); // Always show user bubble
+
+      if (data.ai_response) {
+        setMessages((prev) => [...prev, { role: "ai", content: data.ai_response }]);
+        setAiResponse(data.ai_response);
+      } else if (!data.user_transcript) {
+        // If no transcript and no AI response, show error
+        setMessages((prev) => [...prev, { role: "ai", content: "I couldn't hear that. Please try again." }]);
+      }
+
+      if (data.audio_base64) {
+        setStatus("speaking");
+        const audioUrl = `data:audio/wav;base64,${data.audio_base64}`;
+        if (audioRef.current) {
+          audioRef.current.src = audioUrl;
+          audioRef.current.play();
+          setIsPlaying(true);
+        }
+      } else {
+        setStatus("idle");
+      }
+
+    } catch (error) {
+      console.error("Error processing audio:", error);
+      setMessages(prev => prev.filter(msg => msg.content !== "Thinking..."));
+      setMessages((prev) => [...prev, { role: "ai", content: "Sorry, I couldn't hear that." }]);
+      setStatus("idle");
+    }
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
+      };
+
+      mediaRecorder.onstop = () => {
+        // Use webm as it is the standard browser recording format
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        console.log(`[DEBUG] Audio blob created: ${audioBlob.size} bytes, type: ${audioBlob.type}`);
+        console.log(`[DEBUG] Audio chunks collected: ${audioChunksRef.current.length}`);
+
+        if (audioBlob.size === 0) {
+          console.error('[ERROR] Audio blob is empty! No data was recorded.');
+          alert('No audio was recorded. Please try again and speak closer to the microphone.');
+          setStatus("idle");
+          return;
+        }
+
+        processAudio(audioBlob);
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorder.start();
+      setIsListening(true);
+      setStatus("listening");
+      playCue("start");
+    } catch (error) {
+      console.error("Error accessing microphone:", error);
+      alert("Microphone access denied.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+      mediaRecorderRef.current.stop();
+      setIsListening(false);
+      playCue("stop");
+    }
+  };
+
+  const toggleListening = useCallback(() => {
+    if (status === "speaking" || status === "processing") return;
+    if (isListening) stopRecording();
+    else startRecording();
+  }, [isListening, status]);
+
+  // Logic: Keyboard Shortcut
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === "Space") {
+        e.preventDefault();
+        toggleListening();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [toggleListening]);
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -118,9 +275,9 @@ const BlindMode = () => {
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col items-center justify-center p-8">
-        {/* Microphone Button with Ripple Effect */}
+        {/* Microphone Button with Ripple Effect - RESTORED */}
         <div className="relative mb-12 flex items-center justify-center">
-          {/* Ripple Effects - centered around the button */}
+          {/* Ripple Effects */}
           {isListening && (
             <>
               <div className="absolute w-56 h-56 rounded-full bg-primary/20 animate-pulse-ring" />
@@ -153,27 +310,19 @@ const BlindMode = () => {
           </button>
         </div>
 
-        {/* Status Text */}
+        {/* Status Text - RESTORED */}
         <div className="text-center mb-8">
           <p className="text-xl font-medium text-foreground mb-2">
-            {isListening ? "Listening..." : "Tap to speak"}
+            {status === "processing" ? "Thinking..." : (isListening ? "Listening..." : "Tap to speak")}
           </p>
           <p className="text-muted-foreground">
             {isListening
               ? "Speak clearly, I'm listening to you"
-              : "Press the microphone button to start talking"}
+              : "Press Space or tap the microphone"}
           </p>
         </div>
 
-        {/* Live Transcript */}
-        {transcript && (
-          <div className="bg-card p-4 rounded-xl border border-border max-w-xl w-full mb-8 animate-fade-in">
-            <p className="text-sm text-muted-foreground mb-1">You said:</p>
-            <p className="text-foreground font-medium">{transcript}</p>
-          </div>
-        )}
-
-        {/* Conversation Display */}
+        {/* Conversation Display - RESTORED */}
         <div className="w-full max-w-2xl space-y-4 max-h-[40vh] overflow-y-auto">
           {messages.map((message, index) => (
             <div
@@ -188,7 +337,7 @@ const BlindMode = () => {
                   }`}
               >
                 <p className="text-sm font-medium mb-1">
-                  {message.role === "user" ? "You" : "AI Assistant"}
+                  {message.role === "user" ? "You" : "Drishti"}
                 </p>
                 <p>{message.content}</p>
               </div>
@@ -203,6 +352,12 @@ const BlindMode = () => {
           Press <kbd className="px-2 py-1 bg-card rounded border border-border text-xs">Space</kbd> to toggle microphone
         </p>
       </footer>
+      <audio
+        ref={audioRef}
+        onEnded={() => { setIsPlaying(false); setStatus("idle"); }}
+        onPlay={() => { setIsPlaying(true); setStatus("speaking"); }}
+        className="hidden"
+      />
     </div>
   );
 };

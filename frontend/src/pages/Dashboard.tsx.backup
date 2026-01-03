@@ -1,0 +1,465 @@
+import { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
+import api from "../lib/api";
+import { auth } from "../lib/auth";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import Logo from "@/components/Logo";
+import {
+  Plus,
+  History,
+  Search,
+  MessageSquare,
+  LogOut,
+  Upload,
+  Bell,
+  User,
+  Trophy,
+  Flame,
+  Target,
+  X,
+  BookOpen,
+  Brain,
+  TrendingUp,
+  Clock,
+  Award,
+  Settings
+} from "lucide-react";
+
+
+const Dashboard = () => {
+  const navigate = useNavigate();
+  const [searchQuery, setSearchQuery] = useState("");
+  const [inputMessage, setInputMessage] = useState("");
+  const [response, setResponse] = useState<string | null>(null);
+  const [isHistoryExpanded, setIsHistoryExpanded] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  // const { sendMessage, loading } = useChat(); // Removed inline chat
+
+  // Get user details from localStorage
+  const storedUserType = localStorage.getItem("userType");
+  const storedUserName = localStorage.getItem("userName");
+
+  setUserType(storedUserType);
+  if (storedUserName) {
+    setUserName(storedUserName);
+  }
+}, []);
+
+const handleUploadClick = () => {
+  fileInputRef.current?.click();
+};
+
+const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const file = event.target.files?.[0];
+  if (file) {
+    console.log("File uploaded:", file.name);
+    // Handle the file upload logic here
+  }
+};
+
+/* 
+  Refactored Handle New Session:
+  - Determine if input is URL or Topic.
+  - Redirect to /learn with appropriate query params.
+  - No inline chat here.
+*/
+const handleNewSession = async () => {
+  const message = inputMessage.trim();
+  if (!message) {
+    // Fallback or empty state
+    if (userType === "deaf") navigate("/learn?mode=deaf");
+    else if (userType === "adhd") navigate("/learn?mode=adhd");
+    else navigate("/learn");
+    return;
+  }
+
+  // Regex to find http/https URLs
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  const urlMatch = message.match(urlRegex);
+  const modeParam = userType ? `&mode=${userType}` : "";
+
+  if (urlMatch) {
+    // It contains a URL
+    const extractedUrl = urlMatch[0];
+    // Get the rest of the text as "instruction"
+    const instruction = message.replace(extractedUrl, "").trim();
+
+    const encodedUrl = encodeURIComponent(extractedUrl);
+    const encodedInstruction = instruction ? `&instruction=${encodeURIComponent(instruction)}` : "";
+
+    // Redirect to LearnMode for Video/Content Analysis
+    navigate(`/learn?url=${encodedUrl}${encodedInstruction}${modeParam}`);
+  } else {
+    // Redirect to LearnMode for Topic Explanation
+    // If the user typed "Explain photosynthesis simply", the whole thing is the topic.
+    // But we can try to separate "topic" from "instruction" if we had a pattern.
+    // For now, treat pure text as the "topic".
+    navigate(`/learn?topic=${encodeURIComponent(message)}${modeParam}`);
+  }
+};
+
+const handleLogout = () => {
+  auth.logout();
+  navigate("/login");
+};
+
+if (isLoading) {
+  return (
+    <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="text-center">
+        <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+        <p className="text-muted-foreground">Loading your dashboard...</p>
+      </div>
+    </div>
+  );
+}
+
+const userName = userData?.full_name || "Student User";
+const userEmail = userData?.email || "";
+const userMode = userData?.learning_preference || "adhd";
+
+useEffect(() => {
+  const fetchHistory = async () => {
+    if (!userData?.id) return; // Wait for user data
+    try {
+      const res = await api.get("/learn/history", {
+        params: { user_id: user.id }
+      });
+      setChatHistory(res.data);
+    } catch (e) {
+      console.error("Failed to fetch history", e);
+    }
+  };
+  fetchHistory();
+}, [user]); // Re-run when user changes
+
+return (
+  <div className="min-h-screen bg-background flex">
+    {/* Sidebar */}
+    <aside className="w-72 bg-card border-r border-border flex flex-col sticky top-0 h-screen">
+      <div className="p-4 border-b border-border">
+        <Logo />
+      </div>
+
+      {/* New Chat Button */}
+      <div className="p-4">
+        <Button
+          variant="hero"
+          className="w-full justify-start gap-2"
+          onClick={handleNewSession}
+        >
+          <Plus className="w-4 h-4" />
+          New Learning Session
+        </Button>
+      </div>
+
+      {/* Search */}
+      <div className="px-4 pb-4">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input
+            placeholder="Search history..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-10"
+          />
+        </div>
+      </div>
+
+      {/* History */}
+      <div className="flex-1 overflow-y-auto px-2 custom-scrollbar">
+        <div className="flex items-center gap-2 px-2 py-3 text-sm text-muted-foreground">
+          <History className="w-4 h-4" />
+          History
+        </div>
+        <div className="space-y-1 pb-4">
+          {(isHistoryExpanded ? chatHistory : chatHistory.slice(0, 5)).map((chat) => (
+            <button
+              key={chat.id}
+              onClick={() => navigate(`/learn?sessionId=${chat.id}`)}
+              className="w-full text-left p-3 rounded-lg hover:bg-accent transition-colors group"
+            >
+              <div className="flex items-start gap-3">
+                <MessageSquare className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-foreground truncate">
+                    {chat.title}
+                  </p>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {chat.preview}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {chat.date}
+                  </p>
+                </div>
+              </div>
+            </button>
+          ))}
+
+          {chatHistory.length > 5 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full mt-2 text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => setIsHistoryExpanded(!isHistoryExpanded)}
+            >
+              {isHistoryExpanded ? "Show Less" : `Show ${chatHistory.length - 5} More`}
+            </Button>
+          )}
+
+          {chatHistory.length === 0 && (
+            <div className="px-4 py-8 text-center text-muted-foreground text-xs">
+              No history yet
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* User Actions */}
+      <div className="p-4 border-t border-border">
+        <Button
+          variant="ghost"
+          className="w-full justify-start gap-2 text-muted-foreground"
+          onClick={handleSignOut}
+        >
+          <LogOut className="w-4 h-4" />
+          Sign Out
+        </Button>
+      </div>
+    </aside>
+
+    {/* Main Content */}
+    <main className="flex-1 p-8 overflow-y-auto">
+      <div className="max-w-4xl mx-auto">
+        {/* Header Area with Profile Toggle */}
+        <div className="flex items-center justify-between mb-8">
+          <div className="animate-fade-in">
+            <h1 className="text-3xl font-bold text-foreground mb-2">
+              Welcome Back, {userName}! 👋
+            </h1>
+            <p className="text-muted-foreground">
+              Continue where you left off or start a new learning session
+            </p>
+          </div>
+
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => setIsProfileOpen(!isProfileOpen)}
+          >
+            <User className="w-5 h-5" />
+          </Button>
+        </div>
+
+        {/* Recent Sessions */}
+        <div className="mb-12">
+          <h2 className="text-lg font-semibold text-foreground mb-4">
+            Recent Sessions
+          </h2>
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {chatHistory.slice(0, 3).map((chat, index) => (
+              <button
+                key={chat.id}
+                onClick={() => navigate(`/learn?sessionId=${chat.id}`)}
+                className="bg-card p-6 rounded-2xl border border-border hover:border-primary/50 hover:shadow-lg transition-all text-left animate-fade-in"
+                style={{ animationDelay: `${index * 0.1}s` }}
+              >
+                <div className="flex items-start gap-3">
+                  <MessageSquare className="w-5 h-5 text-primary mt-0.5" />
+                  <div>
+                    <h3 className="font-semibold text-foreground mb-1">
+                      {chat.title}
+                    </h3>
+                    <p className="text-sm text-muted-foreground mb-2">
+                      {chat.preview}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {chat.date}
+                    </p>
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+          {chatHistory.length === 0 && (
+            <div className="text-center text-muted-foreground py-8 bg-card/50 rounded-2xl border border-border/50 border-dashed">
+              No recent sessions found. Start a new learning journey above!
+            </div>
+          )}
+        </div>
+
+        {/* Quick Start */}
+        <div className="bg-gradient-to-r from-primary/10 via-primary/5 to-transparent rounded-2xl p-8 border border-primary/20">
+          <h2 className="text-xl font-semibold text-foreground mb-2">
+            Ask Anything
+          </h2>
+          <p className="text-muted-foreground mb-6">
+            Start a new learning session by asking a question or entering a topic
+          </p>
+          <div className="flex gap-3">
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-12 w-12 shrink-0"
+              onClick={handleUploadClick}
+            >
+              <Upload className="w-5 h-5" />
+            </Button>
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileChange}
+              className="hidden"
+            />
+            <Input
+              placeholder="What would you like to learn today?"
+              className="h-12 text-base"
+              value={inputMessage}
+              onChange={(e) => setInputMessage(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleNewSession()}
+            />
+            <Button variant="hero" size="lg" onClick={handleNewSession}>
+              <Plus className="w-5 h-5 mr-2" />
+              Start
+            </Button>
+          </div>
+          {/* Response Section Removed - Redirects to LearnMode */}
+
+        </div>
+      </div>
+    </main>
+
+    {/* Right Profile Sidebar */}
+    <aside
+      className={`
+          fixed top-0 right-0 h-full w-80 bg-card border-l border-border p-6 
+          flex flex-col gap-8 transition-transform duration-300 z-50 shadow-2xl
+          ${isProfileOpen ? "translate-x-0" : "translate-x-full"}
+        `}
+    >
+      {/* Close Button */}
+      <div className="flex justify-end mb-2">
+        <Button variant="ghost" size="icon" onClick={() => setIsProfileOpen(false)}>
+          <X className="w-5 h-5" />
+        </Button>
+      </div>
+
+      {/* User Profile Header */}
+      <div className="flex items-center gap-4">
+        <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
+          <User className="w-6 h-6 text-primary" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="font-semibold text-foreground truncate">{userName}</h3>
+          <p className="text-sm text-muted-foreground capitalize">{userType || "Student"} Plan</p>
+        </div>
+        <Button variant="ghost" size="icon">
+          <Bell className="w-4 h-4 text-muted-foreground" />
+        </Button>
+      </div>
+
+      {/* Stats */}
+      <div className="space-y-4">
+        <h4 className="font-medium text-foreground">Learning Stats</h4>
+        {/* Stats Cards */}
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Current Streak</CardTitle>
+              <Flame className="h-4 w-4 text-orange-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{streak?.current_streak || 0} days</div>
+              <p className="text-xs text-muted-foreground">
+                Longest: {streak?.longest_streak || 0} days
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Sessions Completed</CardTitle>
+              <BookOpen className="h-4 w-4 text-blue-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{learningHistory.length}</div>
+              <p className="text-xs text-muted-foreground">
+                Total learning sessions
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Active Goals</CardTitle>
+              <Target className="h-4 w-4 text-green-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{goals.length}</div>
+              <p className="text-xs text-muted-foreground">
+                In progress
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Achievements</CardTitle>
+              <Trophy className="h-4 w-4 text-yellow-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{achievements.length}</div>
+              <p className="text-xs text-muted-foreground">
+                Unlocked
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {/* Achievements */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h4 className="font-medium text-foreground">Achievements</h4>
+          <Button variant="link" className="h-auto p-0 text-xs">View All</Button>
+        </div>
+        <div className="space-y-3">
+          <div className="flex items-center gap-3 p-3 bg-background rounded-lg border border-border">
+            <div className="w-8 h-8 rounded-full bg-yellow-500/10 flex items-center justify-center">
+              <Trophy className="w-4 h-4 text-yellow-500" />
+            </div>
+            <div>
+              <p className="text-sm font-medium">Fast Learner</p>
+              <p className="text-xs text-muted-foreground">Completed 5 lessons</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 p-3 bg-background rounded-lg border border-border">
+            <div className="w-8 h-8 rounded-full bg-purple-500/10 flex items-center justify-center">
+              <Trophy className="w-4 h-4 text-purple-500" />
+            </div>
+            <div>
+              <p className="text-sm font-medium">Science Whiz</p>
+              <p className="text-xs text-muted-foreground">Aced Physics test</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    {/* Overlay for mobile when sidebar is open */}
+    {isProfileOpen && (
+      <div
+        className="fixed inset-0 bg-background/80 backdrop-blur-sm z-40"
+        onClick={() => setIsProfileOpen(false)}
+      />
+    )}
+  </div>
+);
+};
+
+export default Dashboard;

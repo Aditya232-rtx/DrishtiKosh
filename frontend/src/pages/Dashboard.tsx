@@ -1,7 +1,13 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import api from "@/lib/api";
+import { auth } from "../lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import Logo from "@/components/Logo";
 import {
   Plus,
@@ -16,26 +22,86 @@ import {
   Flame,
   Target,
   X,
+  BookOpen,
+  Brain,
+  TrendingUp,
+  Clock,
+  Award,
+  Settings
 } from "lucide-react";
+
 
 const Dashboard = () => {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
+  const [inputMessage, setInputMessage] = useState("");
+  const [response, setResponse] = useState<string | null>(null);
+  const [isHistoryExpanded, setIsHistoryExpanded] = useState(false);
   const [userType, setUserType] = useState<string | null>(null);
-  const [userName, setUserName] = useState<string>("Student User");
+  const [userName, setUserName] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [userData, setUserData] = useState<any>(null);
+  const [chatHistory, setChatHistory] = useState<any[]>([]);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [streak, setStreak] = useState<any>(null);
+  const [goals, setGoals] = useState<any[]>([]);
+  const [achievements, setAchievements] = useState<any[]>([]);
+  const [learningHistory, setLearningHistory] = useState<any[]>([]);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // const { sendMessage, loading } = useChat(); // Removed inline chat
 
   useEffect(() => {
-    // Get user details from localStorage
-    const storedUserType = localStorage.getItem("userType");
-    const storedUserName = localStorage.getItem("userName");
+    const fetchUserProfile = async () => {
+      try {
+        const res = await api.get("/api/me", {
+          params: { user_id: auth.getUserId() }
+        });
 
-    setUserType(storedUserType);
-    if (storedUserName) {
-      setUserName(storedUserName);
-    }
-  }, []);
+        const user = res.data;
+        setUserName(user.full_name || user.username);
+        setUserEmail(user.email);
+        setUserType(user.learning_preference || "student");
+
+        // Update local storage for persistence across reloads if needed
+        localStorage.setItem("full_name", user.full_name);
+        localStorage.setItem("email", user.email);
+        localStorage.setItem("learning_preference", user.learning_preference);
+      } catch (e) {
+        console.error("Failed to fetch user profile", e);
+        // Fallback to local storage if API fails
+        const storedUserType = localStorage.getItem("learning_preference");
+        const storedUserName = localStorage.getItem("full_name");
+        const storedEmail = localStorage.getItem("email");
+
+        if (storedUserName) setUserName(storedUserName);
+        if (storedEmail) setUserEmail(storedEmail);
+        if (storedUserType) setUserType(storedUserType);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchUserProfile();
+  }, [navigate]);
+
+  useEffect(() => {
+    const fetchHistory = async () => {
+      const userId = auth.getUserId();
+      if (!userId) return;
+
+      try {
+        const res = await api.get("/api/learn/history", {
+          params: { user_id: userId }
+        });
+        setChatHistory(res.data);
+      } catch (e) {
+        console.error("Failed to fetch history", e);
+      }
+    };
+    fetchHistory();
+  }, []); // Fetch history on mount
 
   const handleUploadClick = () => {
     fileInputRef.current?.click();
@@ -49,48 +115,75 @@ const Dashboard = () => {
     }
   };
 
-  const handleNewSession = () => {
-    // Navigate to learn page with user's mode
-    if (userType === "deaf") {
-      navigate("/learn?mode=deaf");
-    } else if (userType === "adhd") {
-      navigate("/learn?mode=adhd");
+  /* 
+    Refactored Handle New Session:
+    - Determine if input is URL or Topic.
+    - Redirect to /learn with appropriate query params.
+    - No inline chat here.
+  */
+  const handleNewSession = async () => {
+    const message = inputMessage.trim();
+    if (!message) {
+      // Fallback or empty state
+      if (userType === "blind") navigate("/blind");
+      else if (userType === "deaf") navigate("/learn?mode=deaf");
+      else if (userType === "adhd") navigate("/learn?mode=adhd");
+      else navigate("/learn");
+      return;
+    }
+
+    // Regex to find http/https URLs
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    const urlMatch = message.match(urlRegex);
+    const modeParam = userType ? `& mode=${userType} ` : "";
+
+    if (urlMatch) {
+      // It contains a URL
+      const extractedUrl = urlMatch[0];
+      // Get the rest of the text as "instruction"
+      const instruction = message.replace(extractedUrl, "").trim();
+
+      const encodedUrl = encodeURIComponent(extractedUrl);
+      const encodedInstruction = instruction ? `& instruction=${encodeURIComponent(instruction)} ` : "";
+
+      // Redirect to LearnMode for Video/Content Analysis
+      navigate(`/learn?url=${encodedUrl}${encodedInstruction}${modeParam}`);
     } else {
-      navigate("/learn");
+      // Redirect to LearnMode for Topic Explanation
+      // If the user typed "Explain photosynthesis simply", the whole thing is the topic.
+      // But we can try to separate "topic" from "instruction" if we had a pattern.
+      // For now, treat pure text as the "topic".
+      // It's a Topic Explanation
+      if (userType === "blind") {
+        navigate("/blind");
+        return;
+      }
+      navigate(`/learn?topic=${encodeURIComponent(message)}${modeParam}`);
     }
   };
 
   const handleSignOut = () => {
-    localStorage.removeItem("userType");
-    navigate("/");
+    auth.logout();
+    navigate("/login");
   };
 
-  // Mock chat history
-  const chatHistory = [
-    {
-      id: 1,
-      title: "Introduction to Physics",
-      date: "Today",
-      preview: "Learned about Newton's laws of motion...",
-    },
-    {
-      id: 2,
-      title: "World History - Ancient Civilizations",
-      date: "Yesterday",
-      preview: "Explored the Egyptian pyramids...",
-    },
-    {
-      id: 3,
-      title: "Mathematics - Algebra Basics",
-      date: "2 days ago",
-      preview: "Solved quadratic equations...",
-    },
-  ];
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Loading your dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
+
 
   return (
     <div className="min-h-screen bg-background flex">
       {/* Sidebar */}
-      <aside className="w-72 bg-card border-r border-border flex flex-col">
+      <aside className="w-72 bg-card border-r border-border flex flex-col sticky top-0 h-screen">
         <div className="p-4 border-b border-border">
           <Logo />
         </div>
@@ -121,15 +214,16 @@ const Dashboard = () => {
         </div>
 
         {/* History */}
-        <div className="flex-1 overflow-y-auto px-2">
+        <div className="flex-1 overflow-y-auto px-2 custom-scrollbar">
           <div className="flex items-center gap-2 px-2 py-3 text-sm text-muted-foreground">
             <History className="w-4 h-4" />
             History
           </div>
-          <div className="space-y-1">
-            {chatHistory.map((chat) => (
+          <div className="space-y-1 pb-4">
+            {(isHistoryExpanded ? chatHistory : chatHistory.slice(0, 5)).map((chat) => (
               <button
                 key={chat.id}
+                onClick={() => navigate(`/learn?sessionId=${chat.id}`)}
                 className="w-full text-left p-3 rounded-lg hover:bg-accent transition-colors group"
               >
                 <div className="flex items-start gap-3">
@@ -148,6 +242,23 @@ const Dashboard = () => {
                 </div>
               </button>
             ))}
+
+            {chatHistory.length > 5 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full mt-2 text-xs text-muted-foreground hover:text-foreground"
+                onClick={() => setIsHistoryExpanded(!isHistoryExpanded)}
+              >
+                {isHistoryExpanded ? "Show Less" : `Show ${chatHistory.length - 5} More`}
+              </Button>
+            )}
+
+            {chatHistory.length === 0 && (
+              <div className="px-4 py-8 text-center text-muted-foreground text-xs">
+                No history yet
+              </div>
+            )}
           </div>
         </div>
 
@@ -193,12 +304,12 @@ const Dashboard = () => {
               Recent Sessions
             </h2>
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {chatHistory.map((chat, index) => (
+              {chatHistory.slice(0, 3).map((chat, index) => (
                 <button
                   key={chat.id}
-                  onClick={handleNewSession}
+                  onClick={() => navigate(`/learn?sessionId=${chat.id}`)}
                   className="bg-card p-6 rounded-2xl border border-border hover:border-primary/50 hover:shadow-lg transition-all text-left animate-fade-in"
-                  style={{ animationDelay: `${index * 0.1}s` }}
+                  style={{ animationDelay: `${index * 0.1} s` }}
                 >
                   <div className="flex items-start gap-3">
                     <MessageSquare className="w-5 h-5 text-primary mt-0.5" />
@@ -217,6 +328,11 @@ const Dashboard = () => {
                 </button>
               ))}
             </div>
+            {chatHistory.length === 0 && (
+              <div className="text-center text-muted-foreground py-8 bg-card/50 rounded-2xl border border-border/50 border-dashed">
+                No recent sessions found. Start a new learning journey above!
+              </div>
+            )}
           </div>
 
           {/* Quick Start */}
@@ -245,12 +361,17 @@ const Dashboard = () => {
               <Input
                 placeholder="What would you like to learn today?"
                 className="h-12 text-base"
+                value={inputMessage}
+                onChange={(e) => setInputMessage(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleNewSession()}
               />
               <Button variant="hero" size="lg" onClick={handleNewSession}>
                 <Plus className="w-5 h-5 mr-2" />
                 Start
               </Button>
             </div>
+            {/* Response Section Removed - Redirects to LearnMode */}
+
           </div>
         </div>
       </main>
@@ -258,10 +379,10 @@ const Dashboard = () => {
       {/* Right Profile Sidebar */}
       <aside
         className={`
-          fixed top-0 right-0 h-full w-80 bg-card border-l border-border p-6 
-          flex flex-col gap-8 transition-transform duration-300 z-50 shadow-2xl
+          fixed top-0 right-0 h-full w-80 bg-background/95 backdrop-blur-md border-l border-border p-6 
+          flex flex-col gap-6 transition-transform duration-300 z-50 shadow-2xl
           ${isProfileOpen ? "translate-x-0" : "translate-x-full"}
-        `}
+`}
       >
         {/* Close Button */}
         <div className="flex justify-end mb-2">
@@ -271,36 +392,60 @@ const Dashboard = () => {
         </div>
 
         {/* User Profile Header */}
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
-            <User className="w-6 h-6 text-primary" />
+        <div className="flex flex-col items-center text-center p-6 bg-card rounded-3xl border border-border shadow-sm relative overflow-hidden group">
+          <div className="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+
+          <div className="w-20 h-20 rounded-full bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center mb-4 ring-4 ring-background shadow-xl">
+            <User className="w-8 h-8 text-primary" />
           </div>
-          <div className="flex-1 min-w-0">
-            <h3 className="font-semibold text-foreground truncate">{userName}</h3>
-            <p className="text-sm text-muted-foreground capitalize">{userType || "Student"} Plan</p>
+
+          <h3 className="font-bold text-foreground text-xl mb-1">{userName || "Guest User"}</h3>
+          <p className="text-sm text-muted-foreground mb-3">{userEmail || "No email linked"}</p>
+
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-primary/10 text-primary border border-primary/20 capitalize">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+            </span>
+            {userType || "Student"} Mode
           </div>
-          <Button variant="ghost" size="icon">
-            <Bell className="w-4 h-4 text-muted-foreground" />
-          </Button>
         </div>
 
         {/* Stats */}
         <div className="space-y-4">
           <h4 className="font-medium text-foreground">Learning Stats</h4>
+          {/* Stats Cards */}
           <div className="grid grid-cols-2 gap-3">
-            <div className="bg-background p-3 rounded-lg border border-border">
-              <div className="flex items-center gap-2 mb-1">
-                <Flame className="w-4 h-4 text-orange-500" />
-                <span className="text-xs text-muted-foreground">Streak</span>
+            <div className="p-4 bg-orange-500/10 rounded-2xl border border-orange-500/20 flex flex-col items-center justify-center text-center">
+              <div className="mb-2 p-2 bg-background rounded-full shadow-sm">
+                <Flame className="w-5 h-5 text-orange-600" />
               </div>
-              <p className="text-lg font-bold">5 Days</p>
+              <div className="text-xl font-bold text-foreground">{streak?.current_streak || 0}</div>
+              <div className="text-xs text-muted-foreground font-medium">Day Streak</div>
             </div>
-            <div className="bg-background p-3 rounded-lg border border-border">
-              <div className="flex items-center gap-2 mb-1">
-                <Target className="w-4 h-4 text-blue-500" />
-                <span className="text-xs text-muted-foreground">Goal</span>
+
+            <div className="p-4 bg-blue-500/10 rounded-2xl border border-blue-500/20 flex flex-col items-center justify-center text-center">
+              <div className="mb-2 p-2 bg-background rounded-full shadow-sm">
+                <BookOpen className="w-5 h-5 text-blue-600" />
               </div>
-              <p className="text-lg font-bold">85%</p>
+              <div className="text-xl font-bold text-foreground">{learningHistory.length}</div>
+              <div className="text-xs text-muted-foreground font-medium">Sessions</div>
+            </div>
+
+            <div className="p-4 bg-green-500/10 rounded-2xl border border-green-500/20 flex flex-col items-center justify-center text-center">
+              <div className="mb-2 p-2 bg-background rounded-full shadow-sm">
+                <Target className="w-5 h-5 text-green-600" />
+              </div>
+              <div className="text-xl font-bold text-foreground">{goals.length}</div>
+              <div className="text-xs text-muted-foreground font-medium">Goals</div>
+            </div>
+
+            <div className="p-4 bg-yellow-500/10 rounded-2xl border border-yellow-500/20 flex flex-col items-center justify-center text-center">
+              <div className="mb-2 p-2 bg-background rounded-full shadow-sm">
+                <Trophy className="w-5 h-5 text-yellow-600" />
+              </div>
+              <div className="text-xl font-bold text-foreground">{achievements.length}</div>
+              <div className="text-xs text-muted-foreground font-medium">Trophies</div>
             </div>
           </div>
         </div>

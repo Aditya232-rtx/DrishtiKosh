@@ -1,0 +1,16 @@
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic-settings>=2.1.0
+memori
+google-cloud-aiplatform>=1.38.0
+psycopg2-binary>=2.9.9
+pgvector>=0.2.4
+torch
+transformers>=4.36.0
+parler_tts
+python-multipart
+python-dotenv
+requests
+asyncpg
+greenlet
+sqlalchemy>=2.0.0

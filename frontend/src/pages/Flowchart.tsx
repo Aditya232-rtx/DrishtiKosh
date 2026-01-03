@@ -12,32 +12,37 @@ import {
   Download,
 } from "lucide-react";
 
+import api from "@/lib/api";
+
 const Flowchart = () => {
   const [topic, setTopic] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
 
-  // Sample flowchart nodes - this would be AI generated
-  const sampleNodes = [
-    { id: 1, title: "Photosynthesis", level: 0 },
-    { id: 2, title: "Light Reactions", level: 1 },
-    { id: 3, title: "Dark Reactions", level: 1 },
-    { id: 4, title: "Thylakoid", level: 2, parent: 2 },
-    { id: 5, title: "ATP Production", level: 2, parent: 2 },
-    { id: 6, title: "Calvin Cycle", level: 2, parent: 3 },
-    { id: 7, title: "Glucose Formation", level: 2, parent: 3 },
-  ];
+  // Dynamic State
+  const [nodes, setNodes] = useState([]); // Empty initially
+  const [notes, setNotes] = useState([]);
+  const [summary, setSummary] = useState("Enter a topic to generate a flowchart.");
 
-  const notes = [
-    {
-      id: 1,
-      title: "Summary Notes",
-      content: "Key points about photosynthesis...",
-    },
-    {
-      id: 2,
-      title: "Important Formulas",
-      content: "6CO2 + 6H2O → C6H12O6 + 6O2",
-    },
-  ];
+  const handleGenerate = async () => {
+    if (!topic) return;
+    setIsLoading(true);
+    try {
+      const res = await api.post("/learn/flowchart", { topic });
+      setNodes(res.data.nodes);
+      setNotes(res.data.notes);
+      setSummary(res.data.summary);
+    } catch (e) {
+      console.error("Failed to generate flowchart", e);
+      alert("Failed. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Helper to render dynamic nodes (replacing hardcoded structure)
+  // For simplicity, we might just render levels or a list if visualisation library isn't fully set up,
+  // but let's try to map the data to the existing DOM structure roughly or list it.
+
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -109,8 +114,8 @@ const Flowchart = () => {
                 onChange={(e) => setTopic(e.target.value)}
                 className="h-12"
               />
-              <Button variant="default" size="lg">
-                Generate
+              <Button variant="default" size="lg" onClick={handleGenerate} disabled={isLoading}>
+                {isLoading ? "Generating..." : "Generate"}
               </Button>
             </div>
           </div>
@@ -186,17 +191,7 @@ const Flowchart = () => {
           </h3>
           <div className="bg-background rounded-xl p-4 border border-border">
             <p className="text-sm text-muted-foreground leading-relaxed">
-              Photosynthesis is a two-stage process. The{" "}
-              <span className="text-foreground font-medium">
-                light reactions
-              </span>{" "}
-              capture solar energy in the thylakoid membranes, producing ATP
-              and NADPH. The{" "}
-              <span className="text-foreground font-medium">
-                Calvin Cycle
-              </span>{" "}
-              then uses these energy carriers to fix CO2 into glucose in the
-              stroma.
+              {summary}
             </p>
           </div>
 

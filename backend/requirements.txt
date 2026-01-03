@@ -1,16 +1,36 @@
+# Core Framework
 fastapi>=0.109.0
 uvicorn[standard]>=0.27.0
+pydantic>=2.0.0
 pydantic-settings>=2.1.0
-memori
-google-cloud-aiplatform>=1.38.0
-psycopg2-binary>=2.9.9
-pgvector>=0.2.4
-torch
-transformers>=4.36.0
-parler_tts
 python-multipart
 python-dotenv
-requests
+
+# Database
+sqlalchemy>=2.0.0
+alembic>=1.12.0
+psycopg2-binary>=2.9.9
 asyncpg
 greenlet
-sqlalchemy>=2.0.0
+pgvector>=0.2.4
+
+# Authentication & Security
+passlib[bcrypt]>=1.7.4
+python-jose[cryptography]>=3.3.0
+
+# AI & Machine Learning
+google-cloud-aiplatform>=1.38.0
+google-cloud-texttospeech>=2.16.0
+openai-whisper>=20231117
+torch>=2.0.0
+transformers>=4.36.0
+
+# Audio Processing
+soundfile>=0.12.1
+pydub>=0.25.1
+
+# Memory & Vector Storage
+memori
+
+# Utilities
+requests>=2.31.0

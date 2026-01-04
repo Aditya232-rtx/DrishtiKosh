@@ -5,6 +5,7 @@ from app.core.database import get_db
 from app.services.audio import audio_service
 from app.services.vertex import vertex_service
 from app.models.blind_conversation import BlindConversation, BlindMessage, ConversationStatus, MessageRole
+from app.models.learning_session import LearningSession, SessionType
 from app.core.utils import personalize_prompt
 from typing import Optional
 import uuid
@@ -99,7 +100,20 @@ async def blind_interact(
             message_count=0
         )
         db.add(conversation)
-        db.flush()  # Get ID but don't commit yet
+        db.flush()  # Get ID
+
+        # Create linked Learning Session for History/Dashboard
+        if conversation_id is None: # Only for new conversations
+            # Default title based on input or date
+            title = text[:30] + "..." if text else (f"Image Analysis" if image else "Blind Session")
+            
+            learning_session = LearningSession(
+                user_id=uuid.UUID(user_id) if user_id else None,
+                type=SessionType.blind,
+                title=title,
+                content_data={"blind_conversation_id": str(conversation.id)}
+            )
+            db.add(learning_session)
     
     user_input = text or ""
     transcription = ""
@@ -244,3 +258,19 @@ async def get_conversation_history(user_id: str, db: Session = Depends(get_db)):
     ).order_by(BlindConversation.started_at.desc()).all()
     
     return conversations
+
+@router.get("/blind/messages/{conversation_id}")
+async def get_conversation_messages(conversation_id: str, db: Session = Depends(get_db)):
+    """Get all messages for a specific conversation"""
+    messages = db.query(BlindMessage).filter(
+        BlindMessage.conversation_id == uuid.UUID(conversation_id)
+    ).order_by(BlindMessage.created_at.asc()).all()
+    
+    return [
+        {
+            "role": msg.role.value,
+            "content": msg.content,
+            "has_image": msg.has_image,
+            "image_description": msg.image_description
+        } for msg in messages
+    ]

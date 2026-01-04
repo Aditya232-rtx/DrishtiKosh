@@ -11,6 +11,7 @@ class SessionType(enum.Enum):
     topic = "topic"
     image = "image"
     quiz = "quiz"
+    blind = "blind"
 
 class SessionStatus(enum.Enum):
     active = "active"

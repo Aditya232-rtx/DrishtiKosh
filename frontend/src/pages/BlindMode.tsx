@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import Logo from "@/components/Logo";
 import { ArrowLeft, Mic, MicOff, Upload, Volume2 } from "lucide-react";
@@ -8,6 +8,10 @@ import { auth } from "../lib/auth";
 
 const BlindMode = () => {
   const userId = auth.getUserId(); // Get authenticated user ID
+  const [searchParams] = useSearchParams();
+  const sessionId = searchParams.get("sessionId");
+  const initialTopic = searchParams.get("topic");
+  const pendingContext = searchParams.get("pending_context");
   const [isListening, setIsListening] = useState(false);
   // Status for logic, but we'll stick to isListening for UI mostly or map it
   const [status, setStatus] = useState<"idle" | "listening" | "processing" | "speaking">("idle");
@@ -22,7 +26,7 @@ const BlindMode = () => {
     {
       role: "ai",
       content:
-        "Hello! Welcome to Blind Mode. I am ready to help you. Press Space to start speaking, and press Space again to send your message.",
+        "Hi there! I'm Drishti, your AI companion. I'm here to see the world with you. When you're ready, just press the Space bar to talk, and press it again to send. I'm listening.",
     },
   ]);
 
@@ -235,18 +239,87 @@ const BlindMode = () => {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [toggleListening]);
   // Speak Welcome Message on Mount
+  // Speak Welcome Message OR Restore Session
   useEffect(() => {
-    const welcomeText = messages[0].content;
-    const utterance = new SpeechSynthesisUtterance(welcomeText);
-    utterance.rate = 0.9;
-    window.speechSynthesis.cancel(); // Cancel any previous speech
-    window.speechSynthesis.speak(utterance);
+    const initSession = async () => {
+      if (sessionId) {
+        // Restore History
+        try {
+          const sessionRes = await api.get(`/api/learn/session/${sessionId}`);
+          const data = sessionRes.data.data;
+          if (data.blind_conversation_id) {
+            const msgsRes = await api.get(`/api/blind/messages/${data.blind_conversation_id}`);
+            const restored = msgsRes.data.map((m: any) => ({
+              role: m.role,
+              content: m.content
+            }));
+            if (restored.length > 0) setMessages(restored);
+          }
+        } catch (e) {
+          console.error("Failed to restore blind session", e);
+        }
+      } else if (initialTopic) {
+        // Start with Context
+        setMessages(prev => [...prev, { role: "user", content: initialTopic }]);
 
-    // Play subtle cue
-    playCue("start");
+        const formData = new FormData();
+        formData.append('text', initialTopic);
+        if (userId) formData.append('user_id', userId);
+
+        try {
+          const res = await api.post('/api/blind/interact', formData);
+          if (res.data.ai_response) {
+            setMessages(prev => [...prev, { role: "ai", content: res.data.ai_response }]);
+            // Play audio
+            if (res.data.audio_base64) {
+              setStatus("speaking");
+              const audioUrl = `data:audio/wav;base64,${res.data.audio_base64}`;
+              if (audioRef.current) {
+                audioRef.current.src = audioUrl;
+                audioRef.current.play();
+                setIsPlaying(true);
+              }
+            }
+          }
+        } catch (e) {
+          console.error("Failed to start context session", e);
+        }
+      } else {
+        // Default Welcome (Only if no session/topic)
+        const speakWelcome = () => {
+          const welcomeText = messages[0].content;
+          const utterance = new SpeechSynthesisUtterance(welcomeText);
+          utterance.rate = 0.9;
+
+          // Try to find a female/pleasant voice
+          const voices = window.speechSynthesis.getVoices();
+          const preferredVoice = voices.find(v =>
+            v.name.includes("Samantha") ||
+            v.name.includes("Google US English") ||
+            v.name.includes("Zira") ||
+            v.name.includes("Female")
+          );
+          if (preferredVoice) utterance.voice = preferredVoice;
+
+          window.speechSynthesis.cancel();
+          window.speechSynthesis.speak(utterance);
+        };
+
+        if (window.speechSynthesis.getVoices().length > 0) {
+          speakWelcome();
+        } else {
+          window.speechSynthesis.onvoiceschanged = speakWelcome;
+        }
+        // Play subtle cue
+        playCue("start");
+      }
+    };
+
+    initSession();
 
     return () => {
-      window.speechSynthesis.cancel(); // Cleanup on unmount
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.onvoiceschanged = null;
     };
   }, []);
 

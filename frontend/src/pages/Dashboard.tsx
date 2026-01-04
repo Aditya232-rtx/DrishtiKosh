@@ -47,7 +47,13 @@ const Dashboard = () => {
   const [streak, setStreak] = useState<any>(null);
   const [goals, setGoals] = useState<any[]>([]);
   const [achievements, setAchievements] = useState<any[]>([]);
+
   const [learningHistory, setLearningHistory] = useState<any[]>([]);
+  const [uploadContext, setUploadContext] = useState<{ text: string, name: string } | null>(null);
+
+  const [message, setMessage] = useState("");
+  const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [mode, setMode] = useState<"adhd" | "blind">("adhd");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   // const { sendMessage, loading } = useChat(); // Removed inline chat
@@ -106,60 +112,81 @@ const Dashboard = () => {
     fileInputRef.current?.click();
   };
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
       console.log("File uploaded:", file.name);
-      // Handle the file upload logic here
+
+      // Analyze file first
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        // Show loading state if possible, but minimal UI here
+        const res = await api.post("/api/learn/analyze_file", formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+        const extractedText = res.data.context;
+
+        // Store in state, don't navigate yet
+        setUploadContext({ text: extractedText, name: file.name });
+        console.log("Context attached:", file.name);
+
+      } catch (e) {
+        console.error("File analysis failed", e);
+      }
     }
   };
 
-  /* 
-    Refactored Handle New Session:
-    - Determine if input is URL or Topic.
-    - Redirect to /learn with appropriate query params.
-    - No inline chat here.
-  */
-  const handleNewSession = async () => {
-    const message = inputMessage.trim();
-    if (!message) {
-      // Fallback or empty state
-      if (userType === "blind") navigate("/blind");
-      else if (userType === "deaf") navigate("/learn?mode=deaf");
-      else if (userType === "adhd") navigate("/learn?mode=adhd");
-      else navigate("/learn");
+  const handleNewSession = () => {
+    // If we have upload context, save it before navigation
+    if (uploadContext) {
+      localStorage.setItem("pending_context_text", uploadContext.text);
+      localStorage.setItem("pending_context_filename", uploadContext.name);
+    }
+
+    const trimmedMessage = message.trim();
+    if (!trimmedMessage && !uploadContext) return;
+
+    // Detect URL in message
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    const urlMatch = trimmedMessage.match(urlRegex);
+
+    // Determine Navigation
+    const modeParam = `&mode=${mode}`;
+
+    if (userType === "blind") {
+      if (uploadContext) {
+        navigate(`/blind?pending_context=true${trimmedMessage ? `&topic=${encodeURIComponent(trimmedMessage)}` : ""}`);
+      } else {
+        navigate(`/blind?topic=${encodeURIComponent(trimmedMessage)}`);
+      }
       return;
     }
 
-    // Regex to find http/https URLs
-    const urlRegex = /(https?:\/\/[^\s]+)/g;
-    const urlMatch = message.match(urlRegex);
-    const modeParam = userType ? `& mode=${userType} ` : "";
-
     if (urlMatch) {
-      // It contains a URL
+      // Extracted URL logic
       const extractedUrl = urlMatch[0];
-      // Get the rest of the text as "instruction"
-      const instruction = message.replace(extractedUrl, "").trim();
+      const instruction = trimmedMessage.replace(extractedUrl, "").trim();
 
       const encodedUrl = encodeURIComponent(extractedUrl);
-      const encodedInstruction = instruction ? `& instruction=${encodeURIComponent(instruction)} ` : "";
+      const encodedInstruction = instruction ? `&instruction=${encodeURIComponent(instruction)}` : "";
 
-      // Redirect to LearnMode for Video/Content Analysis
-      navigate(`/learn?url=${encodedUrl}${encodedInstruction}${modeParam}`);
+      localStorage.setItem("pending_context_text", uploadContext ? uploadContext.text : ""); // Ensure context is available if mixed (optional feature)
+
+      navigate(`/learn?url=${encodedUrl}${encodedInstruction}${modeParam}${uploadContext ? "&pending_context=true" : ""}`);
     } else {
-      // Redirect to LearnMode for Topic Explanation
-      // If the user typed "Explain photosynthesis simply", the whole thing is the topic.
-      // But we can try to separate "topic" from "instruction" if we had a pattern.
-      // For now, treat pure text as the "topic".
-      // It's a Topic Explanation
-      if (userType === "blind") {
-        navigate("/blind");
-        return;
+      // Topic logic
+      const encodedTopic = encodeURIComponent(trimmedMessage);
+      if (uploadContext) {
+        navigate(`/learn?pending_context=true${trimmedMessage ? `&topic=${encodedTopic}` : ""}${modeParam}`);
+      } else {
+        navigate(`/learn?topic=${encodedTopic}${modeParam}`);
       }
-      navigate(`/learn?topic=${encodeURIComponent(message)}${modeParam}`);
     }
   };
+
+
 
   const handleSignOut = () => {
     auth.logout();
@@ -222,7 +249,13 @@ const Dashboard = () => {
             {(isHistoryExpanded ? chatHistory : chatHistory.slice(0, 5)).map((chat) => (
               <button
                 key={chat.id}
-                onClick={() => navigate(`/learn?sessionId=${chat.id}`)}
+                onClick={() => {
+                  if (chat.type === "blind") {
+                    navigate(`/blind?sessionId=${chat.id}`);
+                  } else {
+                    navigate(`/learn?sessionId=${chat.id}`);
+                  }
+                }}
                 className="w-full text-left p-3 rounded-lg hover:bg-accent transition-colors group"
               >
                 <div className="flex items-start gap-3">
@@ -360,8 +393,8 @@ const Dashboard = () => {
               <Input
                 placeholder="What would you like to learn today?"
                 className="h-12 text-base"
-                value={inputMessage}
-                onChange={(e) => setInputMessage(e.target.value)}
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleNewSession()}
               />
               <Button variant="hero" size="lg" onClick={handleNewSession}>

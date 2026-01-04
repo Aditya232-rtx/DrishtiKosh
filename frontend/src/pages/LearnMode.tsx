@@ -84,6 +84,7 @@ const LearnMode = () => {
             setSlides(data.slides || []);
             setQuizQuestions(data.quiz || []);
             if (data.image) setGeneratedImage(data.image);
+            if (data.video_summary) setGeneratedVideo(data.video_summary);
             setTopic(res.data.title);
 
             // Reset Progress Logic
@@ -187,8 +188,8 @@ const LearnMode = () => {
     // Initial immediate poll
     pollForVideo();
 
-    // Poll every 5 seconds
-    const interval = setInterval(pollForVideo, 5000);
+    // Poll every 30 seconds
+    const interval = setInterval(pollForVideo, 30000);
 
     // Cleanup on unmount or when polling stops
     return () => clearInterval(interval);
@@ -301,7 +302,11 @@ const LearnMode = () => {
               />
               <Label className="text-sm text-muted-foreground">Focus Music</Label>
               {isMusicEnabled && (
-                <audio autoPlay loop>
+                <audio
+                  autoPlay
+                  loop
+                  onLoadedMetadata={(e) => e.currentTarget.volume = 0.1}
+                >
                   <source src="/focus_music.mp4" type="audio/mp4" />
                 </audio>
               )}

@@ -10,7 +10,23 @@ export function useAuth() {
     const [user, setUser] = useState<User | null>(null);
 
     useEffect(() => {
-        // Basic ID generation for prototype isolation
+        // Priority: New Auth Keys -> Legacy Keys -> Generate New
+
+        // 1. Check for authenticated user (from correct keys)
+        const authId = localStorage.getItem('drishtikosh_user_id');
+        const authName = localStorage.getItem('drishtikosh_user_name');
+        const authType = localStorage.getItem('drishtikosh_user_type');
+
+        if (authId) {
+            setUser({
+                id: authId,
+                name: authName || "User",
+                type: authType
+            });
+            return;
+        }
+
+        // 2. Fallback to legacy keys (for prototype / unmigrated state)
         let userId = localStorage.getItem('userId');
         if (!userId) {
             userId = crypto.randomUUID();

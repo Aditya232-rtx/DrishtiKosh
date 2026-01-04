@@ -22,7 +22,7 @@ const BlindMode = () => {
     {
       role: "ai",
       content:
-        "Hello! Welcome back to DrishtiKosh. I'm ready to help you. Let me know your preferred language. Press Space or tap the microphone to speak.",
+        "Hello! Welcome to Blind Mode. I am ready to help you. Press Space to start speaking, and press Space again to send your message.",
     },
   ]);
 
@@ -234,6 +234,21 @@ const BlindMode = () => {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [toggleListening]);
+  // Speak Welcome Message on Mount
+  useEffect(() => {
+    const welcomeText = messages[0].content;
+    const utterance = new SpeechSynthesisUtterance(welcomeText);
+    utterance.rate = 0.9;
+    window.speechSynthesis.cancel(); // Cancel any previous speech
+    window.speechSynthesis.speak(utterance);
+
+    // Play subtle cue
+    playCue("start");
+
+    return () => {
+      window.speechSynthesis.cancel(); // Cleanup on unmount
+    };
+  }, []);
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -317,8 +332,8 @@ const BlindMode = () => {
           </p>
           <p className="text-muted-foreground">
             {isListening
-              ? "Speak clearly, I'm listening to you"
-              : "Press Space or tap the microphone"}
+              ? "Listening... Press Space again to send."
+              : "Press Space to speak"}
           </p>
         </div>
 

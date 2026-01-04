@@ -64,8 +64,12 @@ const Signup = () => {
         learning_preference: formData.disability
       });
 
-      // Store JWT token and user ID
-      auth.setToken(response.data.token, response.data.id);
+      // Store session data
+      auth.setSession(response.data.token, {
+        id: response.data.id,
+        name: response.data.full_name,
+        type: response.data.learning_preference
+      });
 
       toast({
         title: "Account created!",

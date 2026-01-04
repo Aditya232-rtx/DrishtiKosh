@@ -55,7 +55,7 @@ const Dashboard = () => {
   useEffect(() => {
     const fetchUserProfile = async () => {
       try {
-        const res = await api.get("/api/me", {
+        const res = await api.get("/api/auth/me", {
           params: { user_id: auth.getUserId() }
         });
 
@@ -64,24 +64,23 @@ const Dashboard = () => {
         setUserEmail(user.email);
         setUserType(user.learning_preference || "student");
 
-        // Update local storage for persistence across reloads if needed
-        localStorage.setItem("full_name", user.full_name);
-        localStorage.setItem("email", user.email);
-        localStorage.setItem("learning_preference", user.learning_preference);
+        // Sync fresh data to session
+        auth.setSession(auth.getToken() || "", {
+          id: user.id,
+          name: user.full_name || user.username,
+          type: user.learning_preference
+        });
       } catch (e) {
         console.error("Failed to fetch user profile", e);
-        // Fallback to local storage if API fails
-        const storedUserType = localStorage.getItem("learning_preference");
-        const storedUserName = localStorage.getItem("full_name");
-        const storedEmail = localStorage.getItem("email");
-
-        if (storedUserName) setUserName(storedUserName);
-        if (storedEmail) setUserEmail(storedEmail);
-        if (storedUserType) setUserType(storedUserType);
+        // Fallback to local storage using standardized auth helper
+        setUserName(auth.getUserName());
+        setUserType(auth.getUserType());
+        // Email is not critical, can stay null if not found
       } finally {
         setIsLoading(false);
       }
     };
+
 
     fetchUserProfile();
   }, [navigate]);

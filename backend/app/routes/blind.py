@@ -5,6 +5,7 @@ from app.core.database import get_db
 from app.services.audio import audio_service
 from app.services.vertex import vertex_service
 from app.models.blind_conversation import BlindConversation, BlindMessage, ConversationStatus, MessageRole
+from app.core.utils import personalize_prompt
 from typing import Optional
 import uuid
 from datetime import datetime
@@ -148,6 +149,10 @@ async def blind_interact(
     history_text = "\n".join([f"{msg.role.value}: {msg.content}" for msg in recent_messages])
     
     full_prompt = f"{SYSTEM_PROMPT}\n\nHistory:\n{history_text}\n\nUser Input:\n{image_context}\n[User Language: {detected_language_name}]\n{user_input}\n\nDrishti:"
+    
+    # Personalize prompt based on user interest
+    if user_id:
+        full_prompt = personalize_prompt(full_prompt, user_id, db, context="conversation")
 
     # 4. Generate Response (Gemini 2.5 Pro)
     # 4. Generate Response (Gemini 2.5 Pro)
@@ -192,7 +197,9 @@ async def blind_interact(
         print(f"DEBUG: AI Text to convert: '{ai_text}' (Language: {detected_language})")
         audio_buffer = await audio_service.text_to_speech(
             ai_text,
-            language_code=detected_language
+            language_code=detected_language,
+            user_id=user_id,
+            db_session=db
         )
         if audio_buffer:
             print(f"DEBUG: Audio generated successfully with {detected_language_name} voice")

@@ -33,7 +33,7 @@ const LearnMode = () => {
   const mode = searchParams.get("mode") || "adhd";
 
   const [progress, setProgress] = useState(0);
-  const [isMusicEnabled, setIsMusicEnabled] = useState(false);
+  const [isMusicEnabled, setIsMusicEnabled] = useState(true);
   const [currentSlide, setCurrentSlide] = useState(0);
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [showQuiz, setShowQuiz] = useState(false);
@@ -61,6 +61,12 @@ const LearnMode = () => {
   const [quizQuestions, setQuizQuestions] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
+
+  // Video Summary State
+  const [generatedVideo, setGeneratedVideo] = useState<string | null>(null);
+  const [showVideo, setShowVideo] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [isPollingVideo, setIsPollingVideo] = useState(false);
 
   const sessionIdParam = searchParams.get("sessionId");
 
@@ -126,6 +132,13 @@ const LearnMode = () => {
       } else {
         res = await api.post("/api/learn/explain", { topic: value, mode, instruction, user_id: userId || "guest" });
         if (res.data.image) setGeneratedImage(res.data.image);
+
+        // NEW: Capture session_id and start polling for video
+        if (res.data.session_id) {
+          setSessionId(res.data.session_id);
+          setIsPollingVideo(true);
+          console.log("📹 Started polling for video, session:", res.data.session_id);
+        }
       }
 
       setSlides(res.data.slides);
@@ -148,6 +161,38 @@ const LearnMode = () => {
       handleLoadContent("topic", topic);
     }
   };
+
+
+  // Poll for video completion
+  useEffect(() => {
+    if (!isPollingVideo || !sessionId) return;
+
+    console.log("🔄 Polling for video...");
+
+    const pollForVideo = async () => {
+      try {
+        const res = await api.get(`/api/learn/session/${sessionId}`);
+        const videoData = res.data.data?.video_summary;
+
+        if (videoData) {
+          console.log("✅ Video ready! Stopping poll.");
+          setGeneratedVideo(videoData);
+          setIsPollingVideo(false);  // Stop polling
+        }
+      } catch (error) {
+        console.error("Polling error:", error);
+      }
+    };
+
+    // Initial immediate poll
+    pollForVideo();
+
+    // Poll every 5 seconds
+    const interval = setInterval(pollForVideo, 5000);
+
+    // Cleanup on unmount or when polling stops
+    return () => clearInterval(interval);
+  }, [isPollingVideo, sessionId]);
 
 
   const [userAnswers, setUserAnswers] = useState<Record<number, number>>({});
@@ -255,6 +300,11 @@ const LearnMode = () => {
                 aria-label="Toggle background music"
               />
               <Label className="text-sm text-muted-foreground">Focus Music</Label>
+              {isMusicEnabled && (
+                <audio autoPlay loop>
+                  <source src="/focus_music.mp4" type="audio/mp4" />
+                </audio>
+              )}
             </div>
           )}
         </div>
@@ -283,6 +333,24 @@ const LearnMode = () => {
                     allowFullScreen
                     className="absolute inset-0 w-full h-full"
                   ></iframe>
+                </div>
+              ) : showVideo && generatedVideo ? (
+                // Video Player
+                <div className="aspect-video bg-black rounded-3xl overflow-hidden shadow-lg relative">
+                  <video
+                    controls
+                    autoPlay
+                    className="w-full h-full object-contain bg-black"
+                    src={`data:video/mp4;base64,${generatedVideo}`}
+                  >
+                    Your browser doesn't support video playback.
+                  </video>
+                  <button
+                    onClick={() => setShowVideo(false)}
+                    className="absolute top-4 right-4 bg-black/60 hover:bg-black/80 backdrop-blur-sm text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                  >
+                    ← Back to Image
+                  </button>
                 </div>
               ) : (
                 <div className="bg-card/50 backdrop-blur-sm rounded-3xl overflow-hidden border border-border/50 shadow-xl shadow-primary/5 flex-shrink-0 relative group aspect-video">
@@ -334,7 +402,12 @@ const LearnMode = () => {
                   <span className="font-semibold text-foreground/80 group-hover:text-purple-700">Open Notebook</span>
                 </Button>
 
-                <Button variant="outline" className="flex-1 h-14 rounded-2xl flex items-center justify-center gap-3 border-2 border-transparent hover:border-blue-500/20 hover:bg-blue-500/5 transition-all group">
+                <Button
+                  variant="outline"
+                  className="flex-1 h-14 rounded-2xl flex items-center justify-center gap-3 border-2 border-transparent hover:border-blue-500/20 hover:bg-blue-500/5 transition-all group"
+                  onClick={() => setShowVideo(true)}
+                  disabled={!generatedVideo}
+                >
                   <div className="p-2 bg-blue-500/10 rounded-lg group-hover:bg-blue-500/20 text-blue-600 transition-colors">
                     <Video className="w-5 h-5" />
                   </div>

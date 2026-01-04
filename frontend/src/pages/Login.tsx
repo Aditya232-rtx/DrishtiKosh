@@ -28,11 +28,15 @@ const Login = () => {
         password: formData.password
       });
 
-      // Store JWT token and user ID - AND User Details for Sidebar
-      auth.setToken(response.data.token, response.data.id);
-      localStorage.setItem("full_name", response.data.full_name);
+      // Store session data
+      auth.setSession(response.data.token, {
+        id: response.data.id,
+        name: response.data.full_name,
+        type: response.data.learning_preference || "student"
+      });
+
+      // Keep email for other uses if needed
       localStorage.setItem("email", response.data.email);
-      localStorage.setItem("learning_preference", response.data.learning_preference || "student");
 
       toast({
         title: "Welcome back!",

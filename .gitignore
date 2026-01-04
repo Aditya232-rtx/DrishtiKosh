@@ -39,7 +39,11 @@ dist-ssr/
 .vscode/*
 !.vscode/extensions.json
 .idea
+# User files
 .DS_Store
+*.log
+!test_*.py
+!*_test.py
 *.suo
 *.ntvs*
 *.njsproj
@@ -58,8 +62,8 @@ backend/test_outputs/
 backend/outputs/
 backend/history.json
 
-# Services (Open Notebook - separate repo)
-services/
+# Services (Open Notebook - separate repo, but keep backend/app/services tracked)
+services/open-notebook/
 
 # Database
 *.db

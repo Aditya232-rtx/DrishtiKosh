@@ -1,9 +1,10 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Request
 from pydantic import BaseModel
 from typing import List, Optional
 from app.services.vertex import vertex_service
+from app.core.ratelimit import limiter
 import json
 import logging
 from app.core.database import get_db
@@ -192,8 +193,10 @@ async def generate_video_background(
         traceback.print_exc()
 
 @router.post("/learn/explain", response_model=ExplainResponse)
+@limiter.limit("5/minute")
 async def explain_topic(
-    request: ExplainRequest,
+    request: Request,
+    body: ExplainRequest, 
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
@@ -201,8 +204,8 @@ async def explain_topic(
     from app.brain import brain
     
     # 2. Text Explanation (Slides + Quiz)
-    prompt = brain.get_system_prompt(request.mode, "General", "explanation", user_instruction=request.instruction)
-    prompt += f"\n\nTopic: {request.topic}\nCreate 3-5 slides and 2 quiz questions. Return strictly valid JSON (slides, quiz)."
+    prompt = brain.get_system_prompt(body.mode, "General", "explanation", user_instruction=body.instruction)
+    prompt += f"\n\nTopic: {body.topic}\nCreate 3-5 slides and 2 quiz questions. Return strictly valid JSON (slides, quiz)."
     
     # Force JSON format via prompt injection if not in system prompt
     prompt += """
@@ -214,13 +217,13 @@ async def explain_topic(
     """
     
     # Personalize the prompt based on user interest
-    if request.user_id and request.user_id != "guest":
-        prompt = personalize_prompt(prompt, request.user_id, db, context="explanation")
+    if body.user_id and body.user_id != "guest":
+        prompt = personalize_prompt(prompt, body.user_id, db, context="explanation")
         
         # Also personalize quiz generation
         quiz_personalization = personalize_prompt(
             "Generate quiz questions.",
-            request.user_id,
+            body.user_id,
             db,
             context="quiz"
         )
@@ -233,15 +236,15 @@ async def explain_topic(
         
         # 3. Context-Aware Image Generation
         # Generate a prompt for the image based on the topic and mode
-        image_prompt = f"Educational illustration of {request.topic}, {request.mode} friendly style, high quality."
-        if request.instruction:
-             image_prompt += f" Context: {request.instruction}"
-        if request.mode == "adhd":
+        image_prompt = f"Educational illustration of {body.topic}, {body.mode} friendly style, high quality."
+        if body.instruction:
+             image_prompt += f" Context: {body.instruction}"
+        if body.mode == "adhd":
             image_prompt += " Vibrant, infographic style, minimal clutter."
         
         # Personalize image style based on user interest
-        if request.user_id and request.user_id != "guest":
-            image_prompt = personalize_prompt(image_prompt, request.user_id, db, context="image")
+        if body.user_id and body.user_id != "guest":
+            image_prompt = personalize_prompt(image_prompt, body.user_id, db, context="image")
         
         image_b64 = await vertex_service.generate_image_base64(image_prompt)
         data["image"] = image_b64
@@ -249,11 +252,11 @@ async def explain_topic(
         # Save History to DB and get session_id
         session_id = save_history_entry_db(
             db=db,
-            title=request.topic, 
+            title=body.topic, 
             preview=data["slides"][0]["content"] if data["slides"] else "Explaining topic...", 
             type="topic",
             data=data,
-            user_id=request.user_id
+            user_id=body.user_id
         )
         
         # Start background video generation
@@ -261,9 +264,9 @@ async def explain_topic(
             background_tasks.add_task(
                 generate_video_background,
                 session_id=session_id,
-                topic=request.topic,
+                topic=body.topic,
                 slides=data["slides"],
-                user_id=request.user_id or "guest",
+                user_id=body.user_id or "guest",
                 db_session=db
             )
             print(f"🚀 Background video generation started for session {session_id}")
@@ -280,15 +283,16 @@ async def explain_topic(
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/learn/analyze_video", response_model=ExplainResponse)
-async def analyze_video(request: VideoAnalysisRequest, db: Session = Depends(get_db)):
+@limiter.limit("3/minute") # Strict limit for expensive video analysis
+async def analyze_video(request: Request, body: VideoAnalysisRequest, db: Session = Depends(get_db)):
     from app.brain import brain
     
     # Note: Without a YouTube Transcriber, we treat the URL as context.
     # Ideally, we'd fetch the transcript here.
     # For now, we prompt Gemini to "use its knowledge of the video if possible" or General Knowledge + URL context.
     
-    prompt = brain.get_system_prompt(request.mode, "General", "video_analysis", user_instruction=request.instruction)
-    prompt += f"\n\nVideo URL: {request.url}\n"
+    prompt = brain.get_system_prompt(body.mode, "General", "video_analysis", user_instruction=body.instruction)
+    prompt += f"\n\nVideo URL: {body.url}\n"
     prompt += "Task: Analyze the likely content of this video based on its topic/URL context. "
     prompt += "If you cannot access the video directly, use your general knowledge about the implied topic. "
     prompt += "Create detailed educational slides and a quiz."

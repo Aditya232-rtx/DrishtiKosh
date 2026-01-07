@@ -17,6 +17,7 @@ pgvector>=0.2.4
 # Authentication & Security
 passlib[bcrypt]>=1.7.4
 python-jose[cryptography]>=3.3.0
+slowapi>=0.1.9
 
 # AI & Machine Learning
 google-cloud-aiplatform>=1.38.0

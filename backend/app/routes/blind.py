@@ -72,8 +72,13 @@ Your Goal: Be the user's eyes and helpful companion.
 - Use correct native scripts (Devanagari, Tamil, etc.) for Indian languages to ensure the TTS engine pronounces them correctly.
 """
 
+from app.core.ratelimit import limiter
+from starlette.requests import Request
+
 @router.post("/blind/interact")
+@limiter.limit("20/minute")
 async def blind_interact(
+    request: Request,
     audio: Optional[UploadFile] = File(None),
     image: Optional[UploadFile] = File(None),
     text: Optional[str] = Form(None),

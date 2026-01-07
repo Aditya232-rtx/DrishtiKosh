@@ -9,6 +9,9 @@ from app.models.achievement import Achievement, UserAchievement
 import uuid
 from datetime import datetime, date
 
+from app.core.ratelimit import limiter
+from starlette.requests import Request
+
 router = APIRouter()
 
 # Pydantic Models
@@ -37,7 +40,8 @@ async def get_preferences(user_id: str, db: Session = Depends(get_db)):
     return prefs
 
 @router.put("/user/{user_id}/preferences")
-async def update_preferences(user_id: str, update: PreferencesUpdate, db: Session = Depends(get_db)):
+@limiter.limit("50/minute")
+async def update_preferences(request: Request, user_id: str, update: PreferencesUpdate, db: Session = Depends(get_db)):
     prefs = db.query(UserPreferences).filter(UserPreferences.user_id == uuid.UUID(user_id)).first()
     if not prefs:
         prefs = UserPreferences(user_id=uuid.UUID(user_id))

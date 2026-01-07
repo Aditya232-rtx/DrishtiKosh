@@ -110,6 +110,10 @@ With automatic detection and native script rendering:
 - **Python**: 3.11 or higher
 - **Node.js**: 18 or higher
 - **PostgreSQL**: 14 or higher
+- **FFmpeg**: Required for audio processing
+  - Mac: `brew install ffmpeg`
+  - Linux: `sudo apt install ffmpeg`
+  - Windows: Install via Chocolatey or download binary
 - **Google Cloud Account**: For TTS and Vertex AI
   - Enable Cloud Text-to-Speech API
   - Enable Vertex AI API
@@ -133,6 +137,7 @@ source venv/bin/activate  # Windows: venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
+# Note: OpenAI Whisper model (approx 500MB) will automatically download on first run.
 
 # Configure environment
 cp .env.example .env
@@ -144,7 +149,8 @@ cp .env.example .env
 DATABASE_URL=postgresql://username:password@localhost:5432/drishtikosh_db
 
 # Google Cloud
-GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account-key.json
+# Place your JSON key in backend/secrets/ and refer to it here
+GOOGLE_APPLICATION_CREDENTIALS=secrets/your-service-account-key.json
 PROJECT_ID=your-gcp-project-id
 LOCATION=us-central1
 

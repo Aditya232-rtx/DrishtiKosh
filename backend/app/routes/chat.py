@@ -3,6 +3,9 @@ from pydantic import BaseModel
 from app.services.memory import memory_service
 from app.services.vertex import vertex_service
 
+from app.core.ratelimit import limiter
+from starlette.requests import Request
+
 router = APIRouter()
 
 class ChatRequest(BaseModel):
@@ -10,16 +13,17 @@ class ChatRequest(BaseModel):
     message: str
 
 @router.post("/chat")
-async def chat_endpoint(request: ChatRequest):
+@limiter.limit("20/minute")
+async def chat_endpoint(request: Request, body: ChatRequest):
     # 1. Retrieve context from memory
-    context = await memory_service.retrieve_context(request.user_id, request.message)
+    context = await memory_service.retrieve_context(body.user_id, body.message)
     
     # 2. Construct Prompt
     system_instruction = "You are DrishtiKosh, an AI assistant for accessible education. Be helpful, concise, and adaptive."
     if context:
-        prompt = f"{system_instruction}\nContext:\n{context}\n\nUser: {request.message}"
+        prompt = f"{system_instruction}\nContext:\n{context}\n\nUser: {body.message}"
     else:
-        prompt = f"{system_instruction}\nUser: {request.message}"
+        prompt = f"{system_instruction}\nUser: {body.message}"
 
     # 3. Generate response via Vertex AI (Gemini)
     response_text = await vertex_service.generate_text(prompt)

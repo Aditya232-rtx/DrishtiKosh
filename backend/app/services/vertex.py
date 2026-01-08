@@ -34,11 +34,18 @@ class VertexService:
             self.image_model = None
             self.video_model = None
 
-    async def generate_text(self, prompt: str):
+    async def generate_text(self, prompt: str, video_url: str = None):
         if not self.text_model:
             return "Vertex AI not initialized."
         try:
-            response = self.text_model.generate_content(prompt)
+            contents = [prompt]
+            if video_url:
+                # Use YouTube URL directly as a Part (VLM capability)
+                # mime_type="video/mp4" triggers the YouTube processing in Gemini
+                video_part = Part.from_uri(uri=video_url, mime_type="video/mp4")
+                contents.append(video_part)
+                
+            response = self.text_model.generate_content(contents)
             return response.text
         except Exception as e:
             print(f"Error generating text: {e}")

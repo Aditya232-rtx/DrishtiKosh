@@ -128,18 +128,22 @@ const LearnMode = () => {
 
     try {
       let res;
-      if (type === "video") {
-        res = await api.post("/api/learn/analyze_video", { url: value, mode, instruction, user_id: userId || "guest" });
-      } else {
-        res = await api.post("/api/learn/explain", { topic: value, mode, instruction, user_id: userId || "guest" });
-        if (res.data.image) setGeneratedImage(res.data.image);
+      // Unified API call for both Topic and Video (URL treated as topic)
+      res = await api.post("/api/learn/explain", {
+        topic: value,
+        mode,
+        instruction,
+        user_id: userId || "guest",
+        is_video: type === "video"  // Flag to help backend distinguish
+      });
 
-        // NEW: Capture session_id and start polling for video
-        if (res.data.session_id) {
-          setSessionId(res.data.session_id);
-          setIsPollingVideo(true);
-          console.log("📹 Started polling for video, session:", res.data.session_id);
-        }
+      if (res.data.image) setGeneratedImage(res.data.image);
+
+      // NEW: Capture session_id and start polling for video
+      if (res.data.session_id) {
+        setSessionId(res.data.session_id);
+        setIsPollingVideo(true);
+        console.log("📹 Started polling for video, session:", res.data.session_id);
       }
 
       setSlides(res.data.slides);

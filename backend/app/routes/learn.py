@@ -24,6 +24,7 @@ class ExplainRequest(BaseModel):
     mode: str = "adhd"
     instruction: Optional[str] = None
     user_id: str = "guest"  # Added user_id
+    is_video: bool = False  # New flag
 
 
 class Slide(BaseModel):
@@ -204,8 +205,20 @@ async def explain_topic(
     from app.brain import brain
     
     # 2. Text Explanation (Slides + Quiz)
-    prompt = brain.get_system_prompt(body.mode, "General", "explanation", user_instruction=body.instruction)
-    prompt += f"\n\nTopic: {body.topic}\nCreate 3-5 slides and 2 quiz questions. Return strictly valid JSON (slides, quiz)."
+    if body.is_video:
+        # User provided a YouTube URL
+        prompt = brain.get_system_prompt(body.mode, "General", "video_analysis", user_instruction=body.instruction)
+        prompt += f"\n\nAnalyze this YouTube Video URL: {body.topic}\n"
+        prompt += "Instruction: Use your internal knowledge of this YouTube video (title, transcripts, metadata) to Analyze it."
+        prompt += " If you cannot 'watch' it directly, Infer the educational content from the likely topic of this URL."
+        prompt += " Create educational slides and a quiz based on this analysis."
+    else:
+        # Standard Topic Explanation
+        prompt = brain.get_system_prompt(body.mode, "General", "explanation", user_instruction=body.instruction)
+        prompt += f"\n\nTopic: {body.topic}\n"
+        prompt += "Create 3-5 slides and 2 quiz questions."
+
+    prompt += " Return strictly valid JSON (slides, quiz)."
     
     # Force JSON format via prompt injection if not in system prompt
     prompt += """
@@ -230,7 +243,17 @@ async def explain_topic(
         prompt += f"\n{quiz_personalization}"
 
     try:
-        response_text = await vertex_service.generate_text(prompt)
+        # If it's a video, pass the URL for VLM analysis
+        video_uri = body.topic if body.is_video else None
+        
+        # Normalize Short URLs (youtu.be) to Full URLs (youtube.com) for Vertex AI
+        if video_uri and "youtu.be/" in video_uri:
+            video_id = video_uri.split("youtu.be/")[-1].split("?")[0]
+            video_uri = f"https://www.youtube.com/watch?v={video_id}"
+            
+        print(f"📺 Processing Video URI: {video_uri}") 
+
+        response_text = await vertex_service.generate_text(prompt, video_url=video_uri)
         clean_text = response_text.replace("```json", "").replace("```", "").strip()
         data = json.loads(clean_text)
         
@@ -282,55 +305,7 @@ async def explain_topic(
         logger.error(f"Error explaining topic: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/learn/analyze_video", response_model=ExplainResponse)
-@limiter.limit("3/minute") # Strict limit for expensive video analysis
-async def analyze_video(request: Request, body: VideoAnalysisRequest, db: Session = Depends(get_db)):
-    from app.brain import brain
-    
-    # Note: Without a YouTube Transcriber, we treat the URL as context.
-    # Ideally, we'd fetch the transcript here.
-    # For now, we prompt Gemini to "use its knowledge of the video if possible" or General Knowledge + URL context.
-    
-    prompt = brain.get_system_prompt(body.mode, "General", "video_analysis", user_instruction=body.instruction)
-    prompt += f"\n\nVideo URL: {body.url}\n"
-    prompt += "Task: Analyze the likely content of this video based on its topic/URL context. "
-    prompt += "If you cannot access the video directly, use your general knowledge about the implied topic. "
-    prompt += "Create detailed educational slides and a quiz."
-    prompt += """
-    Output strictly valid JSON with this structure:
-    {
-      "slides": [{"title": "...", "content": "..."}],
-      "quiz": [{"question": "...", "options": [], "correct": 0, "explanation": "Why this is correct..."}]
-    }
-    """
-    
-    # Personalize video analysis based on user interest
-    if request.user_id and request.user_id != "guest":
-        prompt = personalize_prompt(prompt, request.user_id, db, context="explanation")
-    
-    try:
-         response_text = await vertex_service.generate_text(prompt)
-         clean_text = response_text.replace("```json", "").replace("```", "").strip()
-         data = json.loads(clean_text)
-         # No image generation for video analysis (video is the visual)
-         data["image"] = None 
 
-         # Save History
-         # Try to extract a title from the explanation or use the URL
-         title = data["slides"][0]["title"] if data.get("slides") else "Video Analysis"
-         save_history_entry_db(
-            db=db,
-            title=title, 
-            preview=f"Analysis of {request.url}", 
-            type="video",
-            data=data,
-            user_id=request.user_id
-        )
-
-         return data
-    except Exception as e:
-        logger.error(f"Error analyzing video: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/learn/flowchart", response_model=FlowchartResponse)
 async def generate_flowchart(request: FlowchartRequest):

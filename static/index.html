@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DrishtiKosh OS - Accessible Learning Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-brand">
+                <h1>DrishtiKosh</h1>
+                <p class="brand-subtitle">Learning OS</p>
+            </div>
+
+            <nav class="sidebar-nav">
+                <div class="nav-group">
+                    <h3 class="nav-group-title">Navigation</h3>
+                    <button class="nav-item" data-view="home" aria-label="Home Dashboard">
+                        <span class="nav-icon">H</span>
+                        <span class="nav-label">Home</span>
+                    </button>
+                    <button class="nav-item" data-view="bot" aria-label="DrishtiBot">
+                        <span class="nav-icon">B</span>
+                        <span class="nav-label">Bot</span>
+                    </button>
+                </div>
+
+                <div class="nav-group">
+                    <h3 class="nav-group-title">Physics</h3>
+                    <button class="nav-item" data-card="CARD_3" aria-label="Thermodynamics">
+                        <span class="nav-icon">T</span>
+                        <span class="nav-label">Thermodynamics</span>
+                    </button>
+                    <button class="nav-item" data-card="CARD_4" aria-label="Newton's Laws">
+                        <span class="nav-icon">N</span>
+                        <span class="nav-label">Newton's Laws</span>
+                    </button>
+                </div>
+
+                <div class="nav-group">
+                    <h3 class="nav-group-title">History</h3>
+                    <button class="nav-item" data-card="CARD_5" aria-label="Mughal Empire">
+                        <span class="nav-icon">M</span>
+                        <span class="nav-label">Mughal Empire</span>
+                    </button>
+                    <button class="nav-item" data-card="CARD_6" aria-label="Indus Valley">
+                        <span class="nav-icon">I</span>
+                        <span class="nav-label">Indus Valley</span>
+                    </button>
+                </div>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="connection-indicator">
+                    <span class="status-dot" id="statusDot"></span>
+                    <span id="connectionText">Connecting...</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Home View -->
+            <section id="homeView" class="view active" aria-label="Home Dashboard">
+                <div class="view-container">
+                    <div class="home-header">
+                        <h2 class="greeting">Welcome to DrishtiKosh</h2>
+                        <p class="time-label" id="timeLabel">System Ready</p>
+                    </div>
+
+                    <div class="home-grid">
+                        <!-- Status Widget -->
+                        <div class="status-card">
+                            <h3>System Status</h3>
+                            <div class="status-items">
+                                <div class="status-item">
+                                    <span class="status-label">Battery</span>
+                                    <span class="status-value">80%</span>
+                                </div>
+                                <div class="status-item">
+                                    <span class="status-label">WiFi</span>
+                                    <span class="status-value">Strong</span>
+                                </div>
+                                <div class="status-item">
+                                    <span class="status-label">System</span>
+                                    <span class="status-value">Online</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Latest Updates -->
+                        <div class="updates-card">
+                            <h3>Latest Updates</h3>
+                            <div class="update-item">
+                                <span class="update-topic">Physics: Thermodynamics</span>
+                                <span class="update-time">Just Now</span>
+                            </div>
+                            <div class="update-item">
+                                <span class="update-topic">History: Mughal Empire</span>
+                                <span class="update-time">2 hours ago</span>
+                            </div>
+                            <div class="update-item">
+                                <span class="update-topic">Physics: Newton's Laws</span>
+                                <span class="update-time">Yesterday</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="quick-start">
+                        <h3>Quick Start</h3>
+                        <p>Tap an RFID card or use the sidebar to explore courses. Content will be read aloud automatically.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Course View -->
+            <section id="courseView" class="view" aria-label="Course View">
+                <div class="course-container">
+                    <!-- Left Panel: Title & Controls -->
+                    <div class="course-left">
+                        <h2 class="course-title" id="courseTitle">Course Title</h2>
+                        
+                        <div class="course-controls">
+                            <button class="control-btn play-btn" id="playBtn" aria-label="Play Summary">
+                                <span class="btn-text">Play</span>
+                            </button>
+                            <button class="control-btn pause-btn" id="pauseBtn" aria-label="Pause Summary">
+                                <span class="btn-text">Pause</span>
+                            </button>
+                            <button class="control-btn stop-btn" id="stopBtn" aria-label="Stop Summary">
+                                <span class="btn-text">Stop</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Right Panel: Summary -->
+                    <div class="course-right">
+                        <div class="summary-box">
+                            <h3>Course Summary</h3>
+                            <div class="summary-content" id="courseSummary">
+                                Course summary will appear here...
+                            </div>
+                        </div>
+                        
+                        <button class="btn-back" id="courseBackBtn" aria-label="Return to Home">
+                            ← Back to Home
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Bot View -->
+            <section id="botView" class="view" aria-label="Bot View">
+                <div class="view-container">
+                    <div class="bot-header">
+                        <h2>DrishtiBot AI</h2>
+                        <p class="bot-subtitle">Your Personal Learning Assistant</p>
+                    </div>
+
+                    <div class="bot-content">
+                        <div class="microphone-ui">
+                            <div class="mic-large" id="micLarge">
+                                <span class="mic-icon">M</span>
+                            </div>
+                            <p class="mic-status" id="botStatus">Listening...</p>
+                        </div>
+
+                        <div class="bot-commands">
+                            <h3>Available Commands</h3>
+                            <ul>
+                                <li>"Read Thermodynamics"</li>
+                                <li>"Show Newton's Laws"</li>
+                                <li>"Tell me about Mughal Empire"</li>
+                                <li>"Go to Home"</li>
+                            </ul>
+                        </div>
+
+                        <button class="btn-back" id="botBackBtn" aria-label="Return to Home">
+                            ← Back to Home
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Redirect View -->
+            <section id="redirectView" class="view" aria-label="Redirect View">
+                <div class="view-container">
+                    <div class="redirect-content">
+                        <h2>Redirecting...</h2>
+                        <div class="spinner"></div>
+                        <p id="redirectMessage">Leaving DrishtiKosh...</p>
+                        <p class="redirect-subtitle">Please wait a moment</p>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Accessibility: Live region for announcements -->
+    <div aria-live="assertive" aria-atomic="true" class="sr-only" id="announcer"></div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>

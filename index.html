@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Focus Realm - 3D Focus Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- 3D Canvas Background -->
+    <canvas id="bg-3d"></canvas>
+
+    <!-- Home View -->
+    <section id="view-home" class="view active">
+        <div class="home-container">
+            <h1 class="cyber-title">FOCUS REALM</h1>
+            <p class="cyber-subtitle">Enter your 3D focus space</p>
+            <button id="enter-realm-btn" class="cyber-button">
+                ENTER REALM
+            </button>
+        </div>
+    </section>
+
+    <!-- Focus Realm View -->
+    <section id="view-focus" class="view">
+        <!-- Layer 1: Forest Dashboard -->
+        <div id="dashboard-layer" class="ui-layer">
+            <div class="dashboard-panel">
+                <h2 class="panel-title">MY FOREST</h2>
+                <div class="forest-stats">
+                    <div class="stat-item">
+                        <span class="stat-label">Total Trees</span>
+                        <span id="total-trees" class="stat-value">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Total Focus Time</span>
+                        <span id="total-time" class="stat-value">0 min</span>
+                    </div>
+                </div>
+                <button id="start-session-btn" class="cyber-button primary">
+                    START NEW SESSION
+                </button>
+            </div>
+        </div>
+
+        <!-- Layer 2: Timer Configuration -->
+        <div id="timer-config-layer" class="ui-layer hidden">
+            <div class="config-panel">
+                <h2 class="panel-title">COMMITMENT</h2>
+                <div class="timer-selector">
+                    <input 
+                        type="range" 
+                        id="duration-slider" 
+                        class="cyber-slider"
+                        min="5" 
+                        max="50" 
+                        value="25" 
+                        step="5"
+                    >
+                    <div class="slider-labels">
+                        <span>5 min</span>
+                        <span id="selected-duration" class="selected-duration">25</span>
+                        <span>50 min</span>
+                    </div>
+                    <p class="duration-text">Commitment: <span id="duration-display">25</span> Minutes</p>
+                </div>
+                <div class="button-group">
+                    <button id="confirm-session-btn" class="cyber-button primary">
+                        COMMIT
+                    </button>
+                    <button id="cancel-config-btn" class="cyber-button secondary">
+                        CANCEL
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Layer 3: Active Session -->
+        <div id="session-layer" class="ui-layer hidden">
+            <div class="session-hud">
+                <div class="session-timer">
+                    <div id="session-timer-display" class="timer-display">25:00</div>
+                    <div class="session-progress">
+                        <div id="session-progress-bar" class="progress-bar">
+                            <div id="session-progress-fill" class="progress-fill"></div>
+                        </div>
+                    </div>
+                </div>
+                <button id="give-up-btn" class="cyber-button danger">
+                    GIVE UP
+                </button>
+            </div>
+        </div>
+    </section>
+
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    
+    <!-- Confetti Library -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
+    
+    <!-- Custom Scripts -->
+    <script src="static/focus_engine.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>

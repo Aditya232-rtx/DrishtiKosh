@@ -1,0 +1,3 @@
+@echo off
+echo Starting Focus Realm Server...
+python main.py

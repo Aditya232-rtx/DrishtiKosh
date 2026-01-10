@@ -6,7 +6,10 @@ from app.services.audio import audio_service
 from app.services.vertex import vertex_service
 from app.models.blind_conversation import BlindConversation, BlindMessage, ConversationStatus, MessageRole
 from app.models.learning_session import LearningSession, SessionType
+from app.models.learning_session import LearningSession, SessionType
 from app.core.utils import personalize_prompt
+from app.core.personalization import build_personalized_system_instruction, DEFAULT_SYSTEM_INSTRUCTION
+from app.core.database import SessionLocal
 from typing import Optional
 import uuid
 import asyncio
@@ -51,7 +54,21 @@ async def blind_live_endpoint(websocket: WebSocket):
     await websocket.accept()
     print("🔌 WebSocket connected: /blind/live")
     
+    # Create database session manually for WebSocket context
+    db = SessionLocal()
+    
     try:
+        # Extract user_id from query parameters
+        query_params = dict(websocket.query_params)
+        user_id = query_params.get("user_id")
+        
+        if not user_id:
+            print("⚠️ No user_id provided, using default instruction")
+            system_instruction_text = DEFAULT_SYSTEM_INSTRUCTION
+        else:
+            print(f"✅ Building personalized instruction for user: {user_id}")
+            system_instruction_text = build_personalized_system_instruction(user_id, db)
+
         if not client:
             print("❌ Client not initialized")
             await websocket.close(code=1011)
@@ -63,79 +80,77 @@ async def blind_live_endpoint(websocket: WebSocket):
                 "response_modalities": ["AUDIO"]
             },
             "system_instruction": {
-                "parts": [{"text": "You are Drishti, a helpful assistant for visually impaired users. Reply in Hindi if spoken to in Hindi. Reply in Hinglish if spoken to in Hinglish. Keep responses under 2 sentences."}]
+                "parts": [{"text": system_instruction_text}]
             }
         }
         
         async with client.aio.live.connect(model=MODEL, config=config) as session:
             print(f"✅ Connected to Gemini Live: {MODEL}")
             
+            # LATENCY OPTIMIZATION: No buffering - stream everything immediately
+            # Gemini Live's internal VAD handles turn-taking and barge-in
+            
+            async def send_to_gemini(data, end_of_turn=False):
+                try:
+                     await session.send(input={"data": data, "mime_type": "audio/pcm"}, end_of_turn=end_of_turn)
+                except Exception as e:
+                    print(f"❌ Error sending to Gemini: {e}")
+
             # Task: Receive from Frontend -> Send to Gemini
             async def receive_from_client():
                 try:
                     while True:
                         message = await websocket.receive()
+                        
                         if "bytes" in message:
-                            audio_data = message["bytes"]
-                            print(f"🎤 Received {len(audio_data)} bytes from client") # Debug log
-                            await session.send(input={"data": audio_data, "mime_type": "audio/pcm"}, end_of_turn=False)
+                            # Stream user audio immediately
+                            await send_to_gemini(message["bytes"], end_of_turn=False)
+                            
                         elif "text" in message:
                              data = json.loads(message["text"])
-                             if data.get("type") == "interrupt":
-                                 pass
-                             elif data.get("type") == "input_end":
-                                 print("🛑 Received input_end signal from client")
-                                 # Send empty frame with end_of_turn=True to commit the turn
-                                 await session.send(input={"data": b"", "mime_type": "audio/pcm"}, end_of_turn=True)
+                             if data.get("type") == "input_end":
+                                 print("🛑 Input End - Committing turn")
+                                 # Signal end of user turn to Gemini
+                                 await send_to_gemini(b"", end_of_turn=True)
+                                 
                 except WebSocketDisconnect:
-                    print("⚠️ Client disconnected normally")
-                except RuntimeError as e:
-                    if "Cannot call \"receive\" once a disconnect" in str(e):
-                        print("⚠️ Client disconnected (RuntimeError detected)")
-                    else:
-                        print(f"❌ RuntimeError in receive_from_client: {e}")
+                    print("⚠️ Client disconnected")
                 except Exception as e:
                     print(f"❌ Error in receive_from_client: {e}")
 
-            # Task: Receive from Gemini -> Send to Frontend
+            # Task: Receive from Gemini -> Stream to Frontend (zero buffering)
             async def receive_from_gemini():
                 try:
                     async for response in session.receive():
                         if response.server_content:
                             if response.server_content.model_turn:
                                 for part in response.server_content.model_turn.parts:
+                                    # Stream TEXT immediately
+                                    if part.text:
+                                        msg = json.dumps({"type": "text", "role": "ai", "content": part.text})
+                                        await websocket.send_text(msg)
+
+                                    # Stream AUDIO immediately (critical for low latency)
                                     if part.inline_data:
-                                        print(f"🔊 Received audio chunk from Gemini") # Debug log
                                         await websocket.send_bytes(part.inline_data.data)
                             
                             if response.server_content.turn_complete:
-                                print("🏁 Turn complete received from Gemini")
+                                print("🏁 Gemini Turn Complete")
                                 await websocket.send_text(json.dumps({"type": "turn_complete"}))
 
                 except Exception as e:
                     print(f"❌ Error in receive_from_gemini: {e}")
 
-            # Run tasks and wait for BOTH to finish (as requested)
-            t1 = asyncio.create_task(receive_from_client())
-            t2 = asyncio.create_task(receive_from_gemini())
-
-            done, pending = await asyncio.wait([t1, t2], return_when=asyncio.ALL_COMPLETED)
-            
-            for t in done:
-                if t == t1:
-                    print("🏁 Client receive task finished")
-                elif t == t2:
-                    print("🏁 Gemini receive task finished")
-                if t.exception():
-                    print(f"💀 Task failed with exception: {t.exception()}")
+            # Run tasks concurrently
+            await asyncio.gather(receive_from_client(), receive_from_gemini())
     
     except Exception as e:
-        print(f"❌ WebSocket Error: {e}")
+        print(f"❌ WebSocket Global Error: {e}")
     finally:
+        db.close()
         try:
             await websocket.close()
         except Exception:
-            # Socket already closed or connection lost
             pass
  
 
@@ -162,7 +177,7 @@ SYSTEM_PROMPT = f"""You are Drishti, an intelligent and compassionate AI assista
 Your Goal: Be the user's eyes and helpful companion.
 
 ### CORE BEHAVIOUR RULES
-1. **CONCISE & SPOKEN-STYLE**: Keep responses short (max 5-7 lines), clear, and natural. Avoid robotic tones.
+1. **MEDIUM LENGTH & CONVERSATIONAL**: Keep responses medium length (approx 3-4 sentences), informative but natural. Avoid long monologues.
 2. **NO MARKDOWN**: Do not use bold, italics, or lists. They break text-to-speech.
 3. **IMAGE DESCRIPTION**: If an image is provided, describe it vividly but briefly, starting with the most important aspect.
 
@@ -178,23 +193,6 @@ Your Goal: Be the user's eyes and helpful companion.
 - Use correct native scripts (Devanagari for Hindi/Marathi, Tamil script for Tamil, Telugu for Telugu, etc.) to ensure the TTS engine pronounces them correctly.
 - For Hindi: Use proper Devanagari punctuation (। for period, ॥ for double period)
 - For other Indian languages: Use appropriate script-specific punctuation
-
-Your Goal: Be the user's eyes and helpful companion.
-
-### CORE BEHAVIOUR RULES
-1. **CONCISE & SPOKEN-STYLE**: Keep responses short (max 5-7 lines), clear, and natural. Avoid robotic tones.
-2. **NO MARKDOWN**: Do not use bold, italics, or lists. They break text-to-speech.
-3. **IMAGE DESCRIPTION**: If an image is provided, describe it vividly but briefly, starting with the most important aspect.
-
-### LANGUAGE BEHAVIOUR RULES
-1. **DETECT & MATCH**: Automatically detect the user's language (Hindi, English, Bengali, Tamil, Telugu, Kannada, Malayalam, Marathi, Gujarati, Punjabi, Assamese, Odia, Urdu, Nepali, Sanskrit, Kashmiri, Sindhi). Respond ONLY in that language.
-2. **HINGLISH HANDLING**: If the user speaks Hinglish or Hindi in English script, understand it but reply in **CLEAR HINDI (Devanagari script)**. Do not use Roman script for Indian languages.
-3. **CLARITY**: Use simple, conversational language. Avoid unnecessary English mixed into Indian languages unless the user explicitly requests it.
-4. **FALLBACK**: If you don't understand the language, politely ask for clarification in Hindi or English (e.g., "Sorry, I am still learning this language. Can we continue in Hindi or English?").
-
-### PRONUNCIATION & TTS OPTIMIZATION
-- Write text that sounds natural when spoken.
-- Use correct native scripts (Devanagari, Tamil, etc.) for Indian languages to ensure the TTS engine pronounces them correctly.
 """
 
 from app.core.ratelimit import limiter

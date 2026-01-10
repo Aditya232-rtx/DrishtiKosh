@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import Logo from "@/components/Logo";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { ThemeToggleButton } from "@/components/ThemeToggleButton";
 
 const Login = () => {
   const navigate = useNavigate();
@@ -64,7 +65,10 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background flex">
+    <div className="min-h-screen bg-background flex relative">
+      <div className="absolute top-4 right-4 z-50">
+        <ThemeToggleButton />
+      </div>
       {/* Left Side - Form */}
       <div className="flex-1 flex flex-col justify-center px-8 lg:px-16">
         <div className="max-w-md w-full mx-auto">

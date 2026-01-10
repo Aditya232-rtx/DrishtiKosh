@@ -6,6 +6,7 @@ import { Upload, FileText, User, Activity, Clock, LogOut, Loader2 } from "lucide
 import { auth } from "../lib/auth";
 import api from "../lib/api";
 import { toast } from "@/hooks/use-toast";
+import { ThemeToggleButton } from "@/components/ThemeToggleButton";
 
 const TeacherDashboard = () => {
     const navigate = useNavigate();
@@ -72,9 +73,10 @@ const TeacherDashboard = () => {
                         <Button variant="ghost" size="icon" onClick={handleSignOut}>
                             <LogOut className="w-5 h-5 text-muted-foreground hover:text-red-500 transition-colors" />
                         </Button>
+                        <ThemeToggleButton />
                     </div>
                 </div>
-            </header>
+            </header >
 
             <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
                 {/* Section 1: Magic Uploader */}
@@ -213,7 +215,7 @@ const TeacherDashboard = () => {
                     </div>
                 </section>
             </main>
-        </div>
+        </div >
     );
 };
 

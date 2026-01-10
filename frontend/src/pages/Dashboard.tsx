@@ -30,6 +30,7 @@ import {
   Settings
 } from "lucide-react";
 
+import { ThemeToggleButton } from "@/components/ThemeToggleButton";
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -323,13 +324,16 @@ const Dashboard = () => {
               </p>
             </div>
 
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => setIsProfileOpen(!isProfileOpen)}
-            >
-              <User className="w-5 h-5" />
-            </Button>
+            <div className="flex gap-4 items-center">
+              <ThemeToggleButton />
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => setIsProfileOpen(!isProfileOpen)}
+              >
+                <User className="w-5 h-5" />
+              </Button>
+            </div>
           </div>
 
           {/* Recent Sessions */}

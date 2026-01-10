@@ -15,6 +15,7 @@ import {
 import Logo from "@/components/Logo";
 import { ArrowLeft, Loader2, Eye, Ear, Brain } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { ThemeToggleButton } from "@/components/ThemeToggleButton";
 
 const Signup = () => {
   const navigate = useNavigate();
@@ -105,7 +106,10 @@ const Signup = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-background flex">
+    <div className="min-h-screen bg-background flex relative">
+      <div className="absolute top-4 right-4 z-50">
+        <ThemeToggleButton />
+      </div>
       {/* Left Side - Decorative */}
       <div className="hidden lg:flex flex-1 bg-gradient-to-bl from-primary/20 via-primary/10 to-background items-center justify-center p-12">
         <div className="max-w-lg text-center">
@@ -164,8 +168,8 @@ const Signup = () => {
                 type="button"
                 onClick={() => setFormData({ ...formData, role })}
                 className={`flex-1 py-2 text-sm font-medium rounded-md transition-all capitalize ${formData.role === role
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
                   }`}
               >
                 {role}

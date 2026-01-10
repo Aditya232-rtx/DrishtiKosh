@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import Logo from "@/components/Logo";
 import { Eye, Ear, Brain, ArrowRight, Sparkles } from "lucide-react";
 import heroImage from "@/assets/hero-learning.png";
+import { ThemeToggleButton } from "@/components/ThemeToggleButton";
 
 const Landing = () => {
   const features = [
@@ -33,6 +34,7 @@ const Landing = () => {
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <Logo />
           <div className="flex items-center gap-4">
+            <ThemeToggleButton />
             <Link to="/about">
               <Button variant="ghost">About Us</Button>
             </Link>

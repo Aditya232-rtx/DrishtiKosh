@@ -26,6 +26,12 @@ class User(Base):
     field_of_interest = Column(String, nullable=True)
     learning_preference = Column(String, nullable=True)  # "blind", "deaf", "adhd"
     
+    # Personalization v3
+    disabilities = Column(String, nullable=True) # Stored as comma-separated string or JSON
+    interests = Column(String, nullable=True) # Stored as comma-separated string or JSON
+    preferred_analogies = Column(String, nullable=True)
+    learning_style = Column(String, nullable=True) # visual, auditory, kinesthetic
+    
     role = Column(String, default="student") # "student", "teacher"
 
     is_active = Column(Boolean, default=True)

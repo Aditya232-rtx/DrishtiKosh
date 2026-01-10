@@ -27,6 +27,7 @@ import {
 import AICompanion from "@/components/AICompanion";
 import BioncText from "@/components/BionicText";
 import InteractiveAvatar from "@/components/InteractiveAvatar";
+import { ThemeToggleButton } from "@/components/ThemeToggleButton";
 
 const LearnMode = () => {
   const [searchParams] = useSearchParams();
@@ -354,6 +355,7 @@ const LearnMode = () => {
               <ArrowLeft className="w-5 h-5" />
             </Link>
             <Logo />
+            <ThemeToggleButton />
           </div>
 
           <div className="flex-1 max-w-md">

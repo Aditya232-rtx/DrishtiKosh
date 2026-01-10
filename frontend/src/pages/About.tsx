@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import Logo from "@/components/Logo";
 import { ArrowLeft, Heart, Target, Users, Sparkles } from "lucide-react";
+import { ThemeToggleButton } from "@/components/ThemeToggleButton";
 
 const About = () => {
   const values = [
@@ -35,7 +36,7 @@ const About = () => {
     <div className="min-h-screen bg-background">
       {/* Navigation */}
       <nav className="bg-background border-b border-border">
-        <div className="container mx-auto px-4 h-16 flex items-center">
+        <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <Link
             to="/"
             className="inline-flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors"
@@ -43,6 +44,7 @@ const About = () => {
             <ArrowLeft className="w-4 h-4" />
             Back to home
           </Link>
+          <ThemeToggleButton />
         </div>
       </nav>
 

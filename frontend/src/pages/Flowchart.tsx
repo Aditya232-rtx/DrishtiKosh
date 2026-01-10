@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Download,
 } from "lucide-react";
+import { ThemeToggleButton } from "@/components/ThemeToggleButton";
 
 import api from "@/lib/api";
 
@@ -58,6 +59,7 @@ const Flowchart = () => {
             </Link>
             <Logo />
             <span className="text-muted-foreground">/ Open Notebook</span>
+            <ThemeToggleButton />
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline">

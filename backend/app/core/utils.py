@@ -117,16 +117,16 @@ def personalize_prompt(base_prompt: str, user_id: str, db: Session, context: str
     
     # Context-specific personalization
     if context == "explanation":
-        personalization = f"\n\nPersonalization Note: The user is passionate about {interest}. Use {style['examples']} in your explanations to make concepts relatable and engaging."
+        personalization = f"\n\nPersonalization Note: The user is passionate about {interest}. Use {style['examples']} in your explanations to make concepts relatable and engaging. Do not use asterisks (*)."
     elif context == "quiz":
         personalization = f"\n\nPersonalization Note: Frame quiz questions using {interest}-related scenarios. Examples: {style['examples']}."
     elif context == "image":
         personalization = f"In {style['visual_style']} style: "
         return personalization + base_prompt  # Prefix for images
     elif context == "conversation":
-        personalization = f"\n\nPersonalization Note: The user is interested in {interest}. When appropriate, use analogies or examples from {style['examples']} to illustrate your points."
+        personalization = f"\n\nPersonalization Note: The user is interested in {interest}. When appropriate, use analogies or examples from {style['examples']} to illustrate your points. Do not use asterisks (*)."
     else:
-        personalization = f"\n\nUser Interest: {interest}. Tailor examples to this domain when relevant."
+        personalization = f"\n\nUser Interest: {interest}. Tailor examples to this domain when relevant. Do not use asterisks (*)."
     
     return base_prompt + personalization
 

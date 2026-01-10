@@ -26,6 +26,7 @@ const Signup = () => {
     confirmPassword: "",
     fieldOfInterest: "",
     disability: "",
+    role: "student",
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -40,7 +41,7 @@ const Signup = () => {
       return;
     }
 
-    if (!formData.disability) {
+    if (formData.role === "student" && !formData.disability) {
       toast({
         title: "Please select your learning preference",
         description: "This helps us personalize your experience.",
@@ -53,22 +54,22 @@ const Signup = () => {
 
     try {
       // Call backend signup API
-      // NOTE: 'api' and 'auth' are assumed to be imported or defined elsewhere.
-      // If not, you'll need to add their imports (e.g., import api from "@/lib/api"; import auth from "@/lib/auth";)
       const response = await api.post('/api/auth/signup', {
         username: formData.name.toLowerCase().replace(/\s+/g, ''),  // Create username from name
         email: formData.email,
         password: formData.password,
         full_name: formData.name,
-        field_of_interest: formData.fieldOfInterest, // Corrected from formData.interests
-        learning_preference: formData.disability
+        field_of_interest: formData.fieldOfInterest,
+        learning_preference: formData.disability || null,
+        role: formData.role
       });
 
       // Store session data
       auth.setSession(response.data.token, {
         id: response.data.id,
         name: response.data.full_name,
-        type: response.data.learning_preference
+        type: response.data.learning_preference,
+        role: response.data.role
       });
 
       toast({
@@ -76,8 +77,10 @@ const Signup = () => {
         description: "Welcome to DrishtiKosh. Let's start learning!",
       });
 
-      // Navigate based on disability type
-      if (formData.disability === "blind") {
+      // Navigate based on role and disability type
+      if (response.data.role === "teacher") {
+        navigate("/teacher-dashboard");
+      } else if (formData.disability === "blind") {
         navigate("/blind");
       } else {
         // ADHD and Deaf users go to dashboard first
@@ -152,6 +155,22 @@ const Signup = () => {
             <p className="text-muted-foreground">
               Join DrishtiKosh and start your accessible learning journey
             </p>
+          </div>
+
+          <div className="mt-8 p-1 bg-muted rounded-lg flex">
+            {["student", "teacher"].map((role) => (
+              <button
+                key={role}
+                type="button"
+                onClick={() => setFormData({ ...formData, role })}
+                className={`flex-1 py-2 text-sm font-medium rounded-md transition-all capitalize ${formData.role === role
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                  }`}
+              >
+                {role}
+              </button>
+            ))}
           </div>
 
           <form onSubmit={handleSubmit} className="mt-8 space-y-5">
@@ -230,29 +249,31 @@ const Signup = () => {
               />
             </div>
 
-            <div className="space-y-2">
-              <Label>Learning Preference</Label>
-              <Select
-                value={formData.disability}
-                onValueChange={(value) =>
-                  setFormData({ ...formData, disability: value })
-                }
-              >
-                <SelectTrigger className="h-12">
-                  <SelectValue placeholder="Select your learning mode" />
-                </SelectTrigger>
-                <SelectContent>
-                  {disabilityOptions.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      <div className="flex items-center gap-2">
-                        <option.icon className="w-4 h-4" />
-                        {option.label}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {formData.role === "student" && (
+              <div className="space-y-2">
+                <Label>Learning Preference</Label>
+                <Select
+                  value={formData.disability}
+                  onValueChange={(value) =>
+                    setFormData({ ...formData, disability: value })
+                  }
+                >
+                  <SelectTrigger className="h-12">
+                    <SelectValue placeholder="Select your learning mode" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {disabilityOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        <div className="flex items-center gap-2">
+                          <option.icon className="w-4 h-4" />
+                          {option.label}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <Button
               type="submit"

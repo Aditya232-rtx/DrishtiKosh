@@ -10,6 +10,11 @@ class LearningPreference(enum.Enum):
     deaf = "deaf"
     adhd = "adhd"
 
+
+class UserRole(enum.Enum):
+    student = "student"
+    teacher = "teacher"
+
 class User(Base):
     __tablename__ = "users"
 
@@ -21,6 +26,8 @@ class User(Base):
     field_of_interest = Column(String, nullable=True)
     learning_preference = Column(String, nullable=True)  # "blind", "deaf", "adhd"
     
+    role = Column(String, default="student") # "student", "teacher"
+
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
     

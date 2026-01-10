@@ -7,21 +7,24 @@ const TOKEN_KEY = 'drishtikosh_token';
 const USER_ID_KEY = 'drishtikosh_user_id';
 const USER_NAME_KEY = 'drishtikosh_user_name';
 const USER_TYPE_KEY = 'drishtikosh_user_type';
+const USER_ROLE_KEY = 'drishtikosh_user_role';
 
 export const auth = {
     /**
      * Store authentication session
      */
-    setSession(token: string, user: { id: string, name: string, type: string }) {
+    setSession(token: string, user: { id: string, name: string, type: string | null, role?: string }) {
         localStorage.setItem(TOKEN_KEY, token);
         localStorage.setItem(USER_ID_KEY, user.id);
         localStorage.setItem(USER_NAME_KEY, user.name);
         if (user.type) localStorage.setItem(USER_TYPE_KEY, user.type);
+        if (user.role) localStorage.setItem(USER_ROLE_KEY, user.role);
 
         // Update legacy keys for compatibility with existing components
         localStorage.setItem('userId', user.id);
         localStorage.setItem('userName', user.name);
         localStorage.setItem('userType', user.type || '');
+        localStorage.setItem('userRole', user.role || 'student');
     },
 
     /**

@@ -12,38 +12,22 @@ from datetime import datetime
 router = APIRouter()
 security = HTTPBearer()
 
-# Rate Limiting
-from app.core.ratelimit import limiter
-from starlette.requests import Request
-
-# Use bcrypt directly
+# Use bcrypt directly (avoiding passlib compatibility issues)
 import bcrypt
 
-# Pydantic Models with Strict Validation
-from pydantic import BaseModel, EmailStr, Field, validator
-import re
-
+# Pydantic Models
 class SignupRequest(BaseModel):
-    username: str = Field(..., min_length=3, max_length=50, pattern="^[a-zA-Z0-9_-]+$")
+    username: str
     email: EmailStr
-    password: str = Field(..., min_length=8, description="Minimum 8 characters")
-    full_name: str = Field(..., min_length=1, max_length=100)
-    field_of_interest: str | None = Field(None, max_length=100)
-    learning_preference: str | None = None  # Enum check handled by logic or model if we want strict enum
-
-    class Config:
-        extra = "forbid"  # Reject unexpected fields
-
-    @validator("email")
-    def normalize_email(cls, v):
-        return v.lower().strip()
+    password: str
+    full_name: str
+    field_of_interest: str | None = None
+    learning_preference: str | None = None  # "blind", "deaf", "adhd"
+    role: str = "student"  # "student", "teacher"
 
 class LoginRequest(BaseModel):
-    username: str  # Can be email or username
+    username: str
     password: str
-
-    class Config:
-        extra = "forbid"
 
 class UserResponse(BaseModel):
     id: str
@@ -52,29 +36,28 @@ class UserResponse(BaseModel):
     full_name: str
     field_of_interest: str | None = None
     learning_preference: str | None = None
-    created_at: str
-    token: str | None = None
+    role: str | None = None
+    created_at: str  # Return as ISO string for JSON compatibility
+    token: str | None = None  # JWT token (optional, only in signup/login)
 
     class Config:
         from_attributes = True
 
 # Helper Functions
 def hash_password(password: str) -> str:
+    """Hash password using bcrypt"""
+    # Bcrypt expects bytes, returns bytes
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verify password against bcrypt hash"""
     return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
 
 @router.post("/signup", response_model=UserResponse)
-@limiter.limit("5/minute")
-async def signup(request: Request, body: SignupRequest, db: Session = Depends(get_db)): # Body via Dependency injection name mismatch fix needed? 
-    # FastAPI handles body automatically if type hints are correct. 
-    # But for Limiter, 'request' is required.
-    # Note: 'body' arg needs to map to Request Body. 
-    
+async def signup(request: SignupRequest, db: Session = Depends(get_db)):
     # Check if user exists
     existing_user = db.query(User).filter(
-        (User.username == body.username) | (User.email == body.email)
+        (User.username == request.username) | (User.email == request.email)
     ).first()
     
     if existing_user:
@@ -86,12 +69,13 @@ async def signup(request: Request, body: SignupRequest, db: Session = Depends(ge
     # Create new user
     new_user = User(
         id=uuid.uuid4(),
-        username=body.username,
-        email=body.email,
-        hashed_password=hash_password(body.password),
-        full_name=body.full_name,
-        field_of_interest=body.field_of_interest,
-        learning_preference=body.learning_preference,
+        username=request.username,
+        email=request.email,
+        hashed_password=hash_password(request.password),
+        full_name=request.full_name,
+        field_of_interest=request.field_of_interest,
+        learning_preference=request.learning_preference,
+        role=request.role,
         is_active=True,
         is_verified=False,
         created_at=datetime.utcnow()
@@ -107,6 +91,7 @@ async def signup(request: Request, body: SignupRequest, db: Session = Depends(ge
         data={"sub": str(new_user.id), "username": new_user.username}
     )
     
+    # Return properly serialized response with token
     return {
         "id": str(new_user.id),
         "username": new_user.username,
@@ -114,35 +99,41 @@ async def signup(request: Request, body: SignupRequest, db: Session = Depends(ge
         "full_name": new_user.full_name,
         "field_of_interest": new_user.field_of_interest,
         "learning_preference": new_user.learning_preference,
+        "role": new_user.role,
         "created_at": new_user.created_at.isoformat() if new_user.created_at else datetime.utcnow().isoformat(),
-        "token": access_token
+        "token": access_token  # Include JWT token
     }
 
 @router.post("/login", response_model=UserResponse)
-@limiter.limit("10/minute")
-async def login(request: Request, body: LoginRequest, db: Session = Depends(get_db)):
-    # Find user
+async def login(request: LoginRequest, db: Session = Depends(get_db)):
+    # Find user by username or email
     user = db.query(User).filter(
-        (User.username == body.username) | (User.email == body.username)
+        (User.username == request.username) | (User.email == request.username)
     ).first()
     
     if not user:
-        # Use Rate Limit for brute force protection? 10/min is decent.
         raise HTTPException(status_code=401, detail="Invalid credentials")
     
+    # Verify password with proper error handling
     try:
-        password_bytes = body.password.encode('utf-8')
+        password_bytes = request.password.encode('utf-8')
         stored_hash = user.hashed_password.encode('utf-8') if isinstance(user.hashed_password, str) else user.hashed_password
         
         if not bcrypt.checkpw(password_bytes, stored_hash):
             raise HTTPException(status_code=401, detail="Invalid credentials")
-    except Exception:
+    except HTTPException:
+        # Re-raise our own HTTPException
+        raise
+    except Exception as e:
+        # Catch any bcrypt/encoding errors and return 401 instead of 500
         raise HTTPException(status_code=401, detail="Invalid credentials")
     
+    # Generate JWT token
     access_token = create_access_token(
         data={"sub": str(user.id)}
     )
     
+    # Return properly serialized response with token
     return {
         "id": str(user.id),
         "username": user.username,
@@ -150,8 +141,9 @@ async def login(request: Request, body: LoginRequest, db: Session = Depends(get_
         "full_name": user.full_name,
         "field_of_interest": user.field_of_interest,
         "learning_preference": user.learning_preference,
+        "role": user.role,
         "created_at": user.created_at.isoformat() if user.created_at else datetime.utcnow().isoformat(),
-        "token": access_token
+        "token": access_token  # Include JWT token
     }
 
 @router.get("/me", response_model=UserResponse)
@@ -188,6 +180,7 @@ async def get_current_user(user_id: str, authorization: str = Header(None), db: 
             "full_name": user.full_name,
             "field_of_interest": user.field_of_interest,
             "learning_preference": user.learning_preference,
+            "role": user.role,
             "created_at": user.created_at.isoformat() if user.created_at else datetime.utcnow().isoformat()
         }
     except ValueError:

@@ -49,7 +49,8 @@ const Dashboard = () => {
   const [achievements, setAchievements] = useState<any[]>([]);
 
   const [learningHistory, setLearningHistory] = useState<any[]>([]);
-  const [uploadContext, setUploadContext] = useState<{ text: string, name: string } | null>(null);
+  const [uploadContext, setUploadContext] = useState<{ uri: string, mime: string, name: string } | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
 
   const [message, setMessage] = useState("");
   const [youtubeUrl, setYoutubeUrl] = useState("");
@@ -57,6 +58,7 @@ const Dashboard = () => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   // const { sendMessage, loading } = useChat(); // Removed inline chat
+  const userId = auth.getUserId();
 
   useEffect(() => {
     const fetchUserProfile = async () => {
@@ -116,24 +118,23 @@ const Dashboard = () => {
     const file = event.target.files?.[0];
     if (file) {
       console.log("File uploaded:", file.name);
-
-      // Analyze file first
+      setIsUploading(true);
       try {
         const formData = new FormData();
         formData.append("file", file);
+        formData.append("user_id", userId || "guest");
 
-        // Show loading state if possible, but minimal UI here
-        const res = await api.post("/api/learn/analyze_file", formData, {
+        const res = await api.post("/api/upload", formData, {
           headers: { 'Content-Type': 'multipart/form-data' }
         });
-        const extractedText = res.data.context;
 
-        // Store in state, don't navigate yet
-        setUploadContext({ text: extractedText, name: file.name });
-        console.log("Context attached:", file.name);
+        const { uri, mime_type, name } = res.data;
+        setUploadContext({ uri, mime: mime_type, name });
 
-      } catch (e) {
-        console.error("File analysis failed", e);
+      } catch (err) {
+        console.error("Upload failed", err);
+      } finally {
+        setIsUploading(false);
       }
     }
   };
@@ -141,8 +142,9 @@ const Dashboard = () => {
   const handleNewSession = () => {
     // If we have upload context, save it before navigation
     if (uploadContext) {
-      localStorage.setItem("pending_context_text", uploadContext.text);
-      localStorage.setItem("pending_context_filename", uploadContext.name);
+      localStorage.setItem("pending_context_uri", uploadContext.uri);
+      localStorage.setItem("pending_context_mime", uploadContext.mime);
+      localStorage.setItem("pending_context_name", uploadContext.name);
     }
 
     const trimmedMessage = message.trim();
@@ -159,7 +161,7 @@ const Dashboard = () => {
       if (uploadContext) {
         navigate(`/blind?pending_context=true${trimmedMessage ? `&topic=${encodeURIComponent(trimmedMessage)}` : ""}`);
       } else {
-        navigate(`/blind?topic=${encodeURIComponent(trimmedMessage)}`);
+        navigate(`/blind${trimmedMessage ? `?topic=${encodeURIComponent(trimmedMessage)}` : ""}`);
       }
       return;
     }
@@ -172,7 +174,7 @@ const Dashboard = () => {
       const encodedUrl = encodeURIComponent(extractedUrl);
       const encodedInstruction = instruction ? `&instruction=${encodeURIComponent(instruction)}` : "";
 
-      localStorage.setItem("pending_context_text", uploadContext ? uploadContext.text : ""); // Ensure context is available if mixed (optional feature)
+      // localStorage.setItem("pending_context_text", uploadContext ? uploadContext.text : ""); // Removed legacy
 
       navigate(`/learn?url=${encodedUrl}${encodedInstruction}${modeParam}${uploadContext ? "&pending_context=true" : ""}`);
     } else {
@@ -375,14 +377,30 @@ const Dashboard = () => {
             <p className="text-muted-foreground mb-6">
               Start a new learning session by asking a question or entering a topic
             </p>
-            <div className="flex gap-3">
+            <div className="flex gap-3 items-center">
+              {uploadContext && (
+                <div className="flex items-center gap-2 px-3 py-1 bg-primary/10 rounded-full border border-primary/20 text-xs text-primary animate-in fade-in slide-in-from-left-2">
+                  <span className="truncate max-w-[100px]">{uploadContext.name}</span>
+                  <button
+                    onClick={() => setUploadContext(null)}
+                    className="hover:bg-primary/20 rounded-full p-0.5"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
               <Button
                 variant="outline"
                 size="icon"
-                className="h-12 w-12 shrink-0"
+                className="h-12 w-12 shrink-0 relative"
                 onClick={handleUploadClick}
               >
                 <Upload className="w-5 h-5" />
+                {isUploading && (
+                  <div className="absolute inset-0 bg-background/50 flex items-center justify-center rounded-md">
+                    <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                  </div>
+                )}
               </Button>
               <input
                 type="file"
@@ -397,7 +415,7 @@ const Dashboard = () => {
                 onChange={(e) => setMessage(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleNewSession()}
               />
-              <Button variant="hero" size="lg" onClick={handleNewSession}>
+              <Button variant="hero" size="lg" onClick={handleNewSession} disabled={isUploading}>
                 <Plus className="w-5 h-5 mr-2" />
                 Start
               </Button>

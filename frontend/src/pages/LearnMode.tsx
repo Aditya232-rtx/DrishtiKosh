@@ -22,6 +22,7 @@ import {
   Play,
   Upload,
   Book,
+  X
 } from "lucide-react";
 import AICompanion from "@/components/AICompanion";
 import BioncText from "@/components/BionicText";
@@ -61,6 +62,16 @@ const LearnMode = () => {
   const [quizQuestions, setQuizQuestions] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
+
+  // Chat State
+  const [chatHistory, setChatHistory] = useState<Array<{ role: 'user' | 'ai', content: string }>>([]);
+  const [isChatLoading, setIsChatLoading] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Scroll to bottom of chat
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatHistory, isChatLoading]);
 
   // Video Summary State
   const [generatedVideo, setGeneratedVideo] = useState<string | null>(null);
@@ -128,13 +139,24 @@ const LearnMode = () => {
 
     try {
       let res;
+      // Retrieve pending file context
+      const fileUri = localStorage.getItem("pending_context_uri");
+      const fileMime = localStorage.getItem("pending_context_mime");
+
+      // Clear after using (optional, or keep until success)
+      localStorage.removeItem("pending_context_uri");
+      localStorage.removeItem("pending_context_mime");
+      localStorage.removeItem("pending_context_name");
+
       // Unified API call for both Topic and Video (URL treated as topic)
       res = await api.post("/api/learn/explain", {
         topic: value,
         mode,
         instruction,
         user_id: userId || "guest",
-        is_video: type === "video"  // Flag to help backend distinguish
+        is_video: type === "video",
+        file_uri: fileUri || undefined,
+        file_mime: fileMime || undefined
       });
 
       if (res.data.image) setGeneratedImage(res.data.image);
@@ -177,15 +199,27 @@ const LearnMode = () => {
     const pollForVideo = async () => {
       try {
         const res = await api.get(`/api/learn/session/${sessionId}`);
-        const videoData = res.data.data?.video_summary;
+        console.log("Poll result:", res.data); // Debug
+
+        const sessionStatus = res.data.data?.status;
+        const videoData = res.data.data?.content_data?.video_summary;
+        const videoStatus = res.data.data?.data?.video_status; // Check inside data.data or data.content_data depending on API
 
         if (videoData) {
           console.log("✅ Video ready! Stopping poll.");
           setGeneratedVideo(videoData);
-          setIsPollingVideo(false);  // Stop polling
+          setIsPollingVideo(false);
+        } else if (res.data.data?.content_data?.video_status === "failed") {
+          console.log("⏹️ Video extraction failed/disabled. Stopping poll.");
+          setIsPollingVideo(false);
+        } else if (sessionStatus === "failed") {
+          // Fallback if status logic changes back
+          console.log(`⏹️ Polling stopped. Status: ${sessionStatus}`);
+          setIsPollingVideo(false);
         }
       } catch (error) {
         console.error("Polling error:", error);
+        setIsPollingVideo(false); // Stop on 404/500
       }
     };
 
@@ -243,31 +277,66 @@ const LearnMode = () => {
 
   // File Upload State
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [fileContext, setFileContext] = useState<{ uri: string, mime: string, name: string } | null>(null);
+  const [isFileUploading, setIsFileUploading] = useState(false);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      // For now, treat file name as specific context/topic since backend file parsing isn't connected yet.
-      // Continuity: Reload with file context
-      setTopic(`Analysis of ${file.name}`);
-      handleLoadContent("topic", `Analysis of uploaded file: ${file.name}`, "Analyze this document context");
+    if (!file) return;
+
+    setIsFileUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("user_id", userId || "guest");
+
+      const res = await api.post("/api/upload", formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+
+      setFileContext({
+        uri: res.data.uri,
+        mime: res.data.mime_type,
+        name: res.data.name
+      });
+
+    } catch (error) {
+      console.error("Upload Error", error);
+    } finally {
+      setIsFileUploading(false);
     }
   };
 
-  const handleAskDoubt = () => {
+  const handleAskDoubt = async () => {
     if (!doubtInput.trim()) return;
 
     const input = doubtInput.trim();
-    setDoubtInput("");
+    setDoubtInput(""); // Clear input immediately
 
-    // Continuity Logic: Check if it's a new topic or URL
-    if (input.startsWith("http")) {
-      setYoutubeUrl(input);
-      handleLoadContent("video", input);
-    } else {
-      // Assume it's a new topic or question requiring a full explanation
-      setTopic(input);
-      handleLoadContent("topic", input);
+    // Add User Message
+    setChatHistory(prev => [...prev, { role: 'user', content: input }]);
+    setIsChatLoading(true);
+
+    try {
+      // Prepare context from current slide
+      const currentContext = slides[currentSlide]?.content || "General Context";
+
+      const res = await api.post("/api/learn/chat", {
+        message: input,
+        context: currentContext,
+        user_id: userId || "guest"
+      });
+
+      const answer = res.data.response;
+
+      // Add AI Response
+      setChatHistory(prev => [...prev, { role: 'ai', content: answer }]);
+
+    } catch (e) {
+      console.error("Chat Failed", e);
+      setChatHistory(prev => [...prev, { role: 'ai', content: "Sorry, I couldn't process that. Please try again." }]);
+    } finally {
+      setIsChatLoading(false);
     }
   };
 
@@ -379,27 +448,102 @@ const LearnMode = () => {
                 </div>
               )}
 
-              {/* 2. Ask Doubt + Upload (Continuity) */}
-              <div className="bg-card rounded-2xl p-1 border border-border shadow-sm flex items-center gap-2 pr-2 group focus-within:ring-2 focus-within:ring-primary/20 transition-all">
-                <div className="bg-primary/10 p-3 rounded-xl cursor-pointer hover:bg-primary/20 transition-colors" onClick={() => fileInputRef.current?.click()}>
-                  <Upload className="w-5 h-5 text-primary" />
+              {/* 2. Interactive Doubt Chat */}
+              <div className="bg-card rounded-3xl border border-border shadow-sm flex flex-col overflow-hidden max-h-[250px]">
+                {/* Chat Header */}
+                <div className="p-3 border-b border-border/50 bg-secondary/20 flex items-center gap-2">
+                  <HelpCircle className="w-4 h-4 text-primary" />
+                  <span className="text-sm font-bold text-foreground">Ask Doubts</span>
                 </div>
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  className="hidden"
-                  onChange={handleFileUpload}
-                />
-                <Input
-                  placeholder="Ask a doubt or enter a new topic..."
-                  value={doubtInput}
-                  onChange={(e) => setDoubtInput(e.target.value)}
-                  className="border-none shadow-none focus-visible:ring-0 bg-transparent text-lg h-12"
-                  onKeyPress={(e) => e.key === "Enter" && handleAskDoubt()}
-                />
-                <Button size="icon" className="h-10 w-10 rounded-xl" onClick={handleAskDoubt}>
-                  <Send className="w-4 h-4" />
-                </Button>
+
+                {/* File Context Chip */}
+                {fileContext && (
+                  <div className="px-3 py-2 bg-background/50 border-b border-border/50">
+                    <div className="flex items-center justify-between px-3 py-2 bg-primary/10 rounded-lg border border-primary/20">
+                      <div className="flex items-center gap-2 overflow-hidden">
+                        <Upload className="w-3 h-3 text-primary shrink-0" />
+                        <span className="text-xs text-primary truncate max-w-[150px]">{fileContext.name}</span>
+                      </div>
+                      <button
+                        onClick={() => setFileContext(null)}
+                        className="p-1 hover:bg-primary/20 rounded-full transition-colors"
+                      >
+                        <X className="w-3 h-3 text-primary" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Chat Messages Area */}
+                <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-[80px] custom-scrollbar bg-background/50">
+                  {chatHistory.length === 0 && (
+                    <div className="text-center text-muted-foreground text-xs py-8 opacity-50">
+                      Ask anything about this topic! <br /> I'm here to help.
+                    </div>
+                  )}
+
+                  {chatHistory.map((msg, i) => (
+                    <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`
+                                max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm
+                                ${msg.role === 'user'
+                          ? 'bg-primary text-primary-foreground rounded-br-none'
+                          : 'bg-card border border-border text-foreground rounded-bl-none'}
+                            `}>
+                        <BioncText text={msg.content.replace(/\*/g, '')} enabled={mode === "adhd"} />
+                      </div>
+                    </div>
+                  ))}
+                  {isChatLoading && (
+                    <div className="flex justify-start">
+                      <div className="bg-card border border-border px-4 py-2 rounded-2xl rounded-bl-none flex gap-1 items-center">
+                        <div className="w-1.5 h-1.5 bg-primary/40 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <div className="w-1.5 h-1.5 bg-primary/40 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <div className="w-1.5 h-1.5 bg-primary/40 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                      </div>
+                    </div>
+                  )}
+                  <div ref={chatEndRef} />
+                </div>
+
+                {/* Input Area */}
+                <div className="p-2 bg-card border-t border-border flex items-center gap-2">
+                  <div
+                    className="p-2.5 rounded-xl cursor-pointer hover:bg-secondary/80 transition-colors text-muted-foreground hover:text-primary relative"
+                    onClick={() => !isFileUploading && fileInputRef.current?.click()}
+                  >
+                    {isFileUploading ? (
+                      <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <Upload className="w-5 h-5" />
+                    )}
+                  </div>
+
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    className="hidden"
+                    onChange={handleFileUpload}
+                    accept=".pdf,.txt,.md,.jpg,.png"
+                  />
+
+                  <Input
+                    placeholder="Type your question..."
+                    value={doubtInput}
+                    onChange={(e) => setDoubtInput(e.target.value)}
+                    className="border-none shadow-none focus-visible:ring-0 bg-transparent text-sm h-10 px-0"
+                    onKeyPress={(e) => e.key === "Enter" && handleAskDoubt()}
+                  />
+
+                  <Button
+                    size="icon"
+                    className="h-9 w-9 rounded-xl shrink-0 transition-all"
+                    onClick={handleAskDoubt}
+                    disabled={(!doubtInput.trim() && !fileContext) || isChatLoading}
+                  >
+                    <Send className="w-4 h-4" />
+                  </Button>
+                </div>
               </div>
 
               {/* ... Action Buttons ... */}

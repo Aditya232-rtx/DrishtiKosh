@@ -8,6 +8,7 @@ import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import About from "./pages/About";
 import Dashboard from "./pages/Dashboard";
+import TeacherDashboard from "./pages/TeacherDashboard";
 import BlindMode from "./pages/BlindMode";
 import LearnMode from "./pages/LearnMode";
 import Flowchart from "./pages/Flowchart";
@@ -27,6 +28,7 @@ const App = () => (
           <Route path="/signup" element={<Signup />} />
           <Route path="/about" element={<About />} />
           <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/teacher-dashboard" element={<TeacherDashboard />} />
           <Route path="/blind" element={<BlindMode />} />
           <Route path="/learn" element={<LearnMode />} />
           <Route path="/flowchart" element={<Flowchart />} />

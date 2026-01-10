@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from app.core.database import get_db
@@ -9,10 +9,135 @@ from app.models.learning_session import LearningSession, SessionType
 from app.core.utils import personalize_prompt
 from typing import Optional
 import uuid
+import asyncio
+import json
+import os
 from datetime import datetime
 import base64
+from google import genai
+
+from google.genai.types import HttpOptions
 
 router = APIRouter()
+from app.core.config import settings
+
+# --- Gemini Live Configuration ---
+# User requested Vertex AI instead of API Key
+PROJECT_ID = settings.PROJECT_ID
+LOCATION = settings.LOCATION
+
+if not PROJECT_ID:
+    print("❌ CRITICAL ERROR: PROJECT_ID is missing for Vertex AI!")
+    print("👉 Please add PROJECT_ID=your-project-id to your backend/.env file")
+    client = None
+else:
+    print(f"✅ Gemini Live: Using Vertex AI (Project: {PROJECT_ID}, Location: {LOCATION})")
+    try:
+        client = genai.Client(
+            vertexai=True,
+            project=PROJECT_ID,
+            location=LOCATION,
+            http_options=HttpOptions(api_version="v1beta1")
+        )
+    except Exception as e:
+        print(f"❌ Failed to initialize Vertex AI Client: {e}")
+        client = None
+
+# Using the correct model ID for Vertex AI Live Preview
+MODEL = "gemini-2.0-flash-live-preview-04-09"
+
+@router.websocket("/blind/live")
+async def blind_live_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    print("🔌 WebSocket connected: /blind/live")
+    
+    try:
+        if not client:
+            print("❌ Client not initialized")
+            await websocket.close(code=1011)
+            return
+
+        # Initialize Gemini Live Session
+        config = {
+            "generation_config": {
+                "response_modalities": ["AUDIO"]
+            },
+            "system_instruction": {
+                "parts": [{"text": "You are Drishti, a helpful assistant for visually impaired users. Reply in Hindi if spoken to in Hindi. Reply in Hinglish if spoken to in Hinglish. Keep responses under 2 sentences."}]
+            }
+        }
+        
+        async with client.aio.live.connect(model=MODEL, config=config) as session:
+            print(f"✅ Connected to Gemini Live: {MODEL}")
+            
+            # Task: Receive from Frontend -> Send to Gemini
+            async def receive_from_client():
+                try:
+                    while True:
+                        message = await websocket.receive()
+                        if "bytes" in message:
+                            audio_data = message["bytes"]
+                            print(f"🎤 Received {len(audio_data)} bytes from client") # Debug log
+                            await session.send(input={"data": audio_data, "mime_type": "audio/pcm"}, end_of_turn=False)
+                        elif "text" in message:
+                             data = json.loads(message["text"])
+                             if data.get("type") == "interrupt":
+                                 pass
+                             elif data.get("type") == "input_end":
+                                 print("🛑 Received input_end signal from client")
+                                 # Send empty frame with end_of_turn=True to commit the turn
+                                 await session.send(input={"data": b"", "mime_type": "audio/pcm"}, end_of_turn=True)
+                except WebSocketDisconnect:
+                    print("⚠️ Client disconnected normally")
+                except RuntimeError as e:
+                    if "Cannot call \"receive\" once a disconnect" in str(e):
+                        print("⚠️ Client disconnected (RuntimeError detected)")
+                    else:
+                        print(f"❌ RuntimeError in receive_from_client: {e}")
+                except Exception as e:
+                    print(f"❌ Error in receive_from_client: {e}")
+
+            # Task: Receive from Gemini -> Send to Frontend
+            async def receive_from_gemini():
+                try:
+                    async for response in session.receive():
+                        if response.server_content:
+                            if response.server_content.model_turn:
+                                for part in response.server_content.model_turn.parts:
+                                    if part.inline_data:
+                                        print(f"🔊 Received audio chunk from Gemini") # Debug log
+                                        await websocket.send_bytes(part.inline_data.data)
+                            
+                            if response.server_content.turn_complete:
+                                print("🏁 Turn complete received from Gemini")
+                                await websocket.send_text(json.dumps({"type": "turn_complete"}))
+
+                except Exception as e:
+                    print(f"❌ Error in receive_from_gemini: {e}")
+
+            # Run tasks and wait for BOTH to finish (as requested)
+            t1 = asyncio.create_task(receive_from_client())
+            t2 = asyncio.create_task(receive_from_gemini())
+
+            done, pending = await asyncio.wait([t1, t2], return_when=asyncio.ALL_COMPLETED)
+            
+            for t in done:
+                if t == t1:
+                    print("🏁 Client receive task finished")
+                elif t == t2:
+                    print("🏁 Gemini receive task finished")
+                if t.exception():
+                    print(f"💀 Task failed with exception: {t.exception()}")
+    
+    except Exception as e:
+        print(f"❌ WebSocket Error: {e}")
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            # Socket already closed or connection lost
+            pass
+ 
 
 # EXPLICIT SUPPORTED LANGUAGES - Only these 12 Indian languages + English
 SUPPORTED_LANGUAGES = {

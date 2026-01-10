@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = None
     PROJECT_ID: Optional[str] = None
     LOCATION: str = "us-central1"
+    GOOGLE_API_KEY: Optional[str] = None
     
     # JWT Auth
     SECRET_KEY: str  # Must be set in .env

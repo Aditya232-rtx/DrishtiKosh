@@ -34,16 +34,22 @@ class VertexService:
             self.image_model = None
             self.video_model = None
 
-    async def generate_text(self, prompt: str, video_url: str = None):
+    async def generate_text(self, prompt: str, video_url: str = None, files: list = None):
         if not self.text_model:
             return "Vertex AI not initialized."
         try:
             contents = [prompt]
             if video_url:
                 # Use YouTube URL directly as a Part (VLM capability)
-                # mime_type="video/mp4" triggers the YouTube processing in Gemini
                 video_part = Part.from_uri(uri=video_url, mime_type="video/mp4")
                 contents.append(video_part)
+            
+            if files:
+                for file_info in files:
+                    # Expecting file_info = {"uri": "gs://...", "mime_type": "..."}
+                    if "uri" in file_info and "mime_type" in file_info:
+                         file_part = Part.from_uri(uri=file_info["uri"], mime_type=file_info["mime_type"])
+                         contents.append(file_part)
                 
             response = self.text_model.generate_content(contents)
             return response.text

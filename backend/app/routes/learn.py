@@ -23,8 +23,10 @@ class ExplainRequest(BaseModel):
     topic: str
     mode: str = "adhd"
     instruction: Optional[str] = None
-    user_id: str = "guest"  # Added user_id
-    is_video: bool = False  # New flag
+    user_id: str = "guest"
+    is_video: bool = False
+    file_uri: Optional[str] = None
+    file_mime: Optional[str] = None
 
 
 class Slide(BaseModel):
@@ -51,6 +53,14 @@ class VideoAnalysisRequest(BaseModel):
     instruction: Optional[str] = None
     user_id: str = "guest"
 
+class ChatRequest(BaseModel):
+    message: str
+    context: Optional[str] = None
+    user_id: str = "guest"
+    # New: Accept GCS file info
+    file_uri: Optional[str] = None
+    file_mime: Optional[str] = None
+
 
 class FlowchartRequest(BaseModel):
     topic: str
@@ -72,6 +82,44 @@ class FlowchartResponse(BaseModel):
     summary: str
 
 # --- Endpoints ---
+
+@router.post("/learn/chat")
+async def learn_chat(req: ChatRequest, db: Session = Depends(get_db)):
+    """
+    Inline chat for Learn Mode. 
+    Answers doubts using personalized prompt settings.
+    """
+    try:
+        # 1. Personalize Prompt
+        user_uuid = req.user_id if req.user_id != "guest" else None
+        
+        base_prompt = f"""
+        You are a helpful AI tutor. The user has a doubt: "{req.message}".
+        
+        Context of the lesson: {req.context if req.context else 'General Query'}
+        
+        Answer the doubt concisely and clearly. 
+        Focus on explaining the concept simply.
+        Do not use asterisks (*) in your response.
+        """
+        
+        # FIX: personalize_prompt is synchronous and args were wrong order
+        prompt = personalize_prompt(base_prompt, req.user_id, db, context="conversation")
+        
+        # 2. Call Vertex AI
+        files = []
+        if req.file_uri and req.file_mime:
+             files.append({"uri": req.file_uri, "mime_type": req.file_mime})
+             prompt += "\n[Context: The user has uploaded a file. Use the attached file to answer the doubt.]"
+
+        response_text = await vertex_service.generate_text(prompt, files=files)
+        
+        return {"response": response_text}
+
+    except Exception as e:
+        logger.error(f"Chat error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate answer")
+
 
 def save_history_entry_db(db: Session, title: str, preview: str, type: str, data: dict, user_id: str = "guest"):
     try:
@@ -128,8 +176,9 @@ async def get_session(session_id: str, db: Session = Depends(get_db)):
         "title": item.title,
         "type": item.type.value,
         "data": item.content_data,
-        "timestamp": item.created_at.isoformat()
-}
+        "timestamp": item.created_at.isoformat(),
+        "status": item.status.value
+    }
 
 # Background Video Generation Function
 async def generate_video_background(
@@ -166,16 +215,32 @@ async def generate_video_background(
             duration=8
         )
         
-        if video_b64:
-            # Update session with generated video
+        # Mark session as failed immediately to stop frontend polling
+        session = db_session.query(LearningSession).filter(
+             LearningSession.id == uuid.UUID(session_id)
+        ).first()
+
+        if not video_b64:
+            # Mark session as failed immediately to stop frontend polling
             session = db_session.query(LearningSession).filter(
-                LearningSession.id == uuid.UUID(session_id)
+                 LearningSession.id == uuid.UUID(session_id)
             ).first()
-            
+
+            if session:
+                 # Mark video as failed in content_data w/o failing session
+                 content_data = session.content_data or {}
+                 content_data["video_status"] = "failed"
+                 session.content_data = content_data
+                 flag_modified(session, "content_data")
+                 
+                 db_session.commit()
+                 print(f"❌ Session {session_id} video generation FAILED (or returned None)")
+        else:
             if session:
                 # Update content_data JSON with video
                 content_data = session.content_data or {}
                 content_data["video_summary"] = video_b64
+                content_data["video_status"] = "completed"
                 session.content_data = content_data
                 
                 # Mark as updated (tell SQLAlchemy JSON changed)
@@ -185,8 +250,6 @@ async def generate_video_background(
                 print(f"✅ Video stored in session {session_id} ({len(video_b64)} chars)")
             else:
                 print(f"❌ Session {session_id} not found")
-        else:
-            print(f"❌ Video generation returned None")
             
     except Exception as e:
         print(f"❌ Background video generation failed: {e}")
@@ -219,6 +282,7 @@ async def explain_topic(
         prompt += "Create 3-5 slides and 2 quiz questions."
 
     prompt += " Return strictly valid JSON (slides, quiz)."
+    prompt += " IMPORTANT: Do not use asterisks (*) in any text content."
     
     # Force JSON format via prompt injection if not in system prompt
     prompt += """
@@ -253,7 +317,14 @@ async def explain_topic(
             
         print(f"📺 Processing Video URI: {video_uri}") 
 
-        response_text = await vertex_service.generate_text(prompt, video_url=video_uri)
+        # Handle File Context
+        files = []
+        if body.file_uri and body.file_mime:
+             print(f"DEBUG: Adding Explain context file: {body.file_uri}")
+             files.append({"uri": body.file_uri, "mime_type": body.file_mime})
+             prompt += "\n\nCRITICAL INSTRUCTION: The user has provided an attached file. YOU MUST BASE YOUR EXPLANATION, SLIDES, AND QUIZ SOLELY AND EXCLUSIVELY ON THE CONTENT OF THIS FILE. Do not use external knowledge unless the file is unreadable. If the file contradicts general knowledge, follow the file."
+
+        response_text = await vertex_service.generate_text(prompt, video_url=video_uri, files=files)
         clean_text = response_text.replace("```json", "").replace("```", "").strip()
         data = json.loads(clean_text)
         

@@ -53,7 +53,7 @@ class AudioService:
             'pa': 'pa-IN-Wavenet-A',    # Female
             'ta': 'ta-IN-Wavenet-A',    # Female
             'te': 'te-IN-Standard-A',   # Female (Neural not always avail)
-            'or': 'or-IN-Standard-A',   # Female
+            'or': 'bn-IN-Wavenet-A',    # FALLBACK: Odia not supported in standard GCP TTS yet, use Bengali
             'as': 'bn-IN-Wavenet-A',    # Fallback to Bengali
         }
 
@@ -165,6 +165,7 @@ class AudioService:
         import soundfile as sf
         import numpy as np
         import tempfile
+        import re
         
         print(f"DEBUG: Received audio bytes: {len(audio_bytes)} bytes")
         
@@ -201,12 +202,31 @@ class AudioService:
                 fp16=False,
                 beam_size=5,
                 best_of=5,
-                temperature=0.0
+                temperature=0.0,
+                condition_on_previous_text=False # Prevent hallucination loops from prev context
             )
             
             transcription = result["text"].strip()
             detected_language = result.get("language", "unknown")
             
+            # --- HALLUCINATION & REPETITION FILTER ---
+            
+            # 1. Filter Repetitive Loops (e.g. "To subscribe...", "Copyright...", "Amara.org")
+            hallucinations = [
+                "subscribe", "copyright", "amara.org", "thank you", "watching"
+            ]
+            if any(h in transcription.lower() for h in hallucinations) and len(transcription) < 40:
+                 print(f"DEBUG: Filtered known hallucination: '{transcription}'")
+                 transcription = ""
+
+            # 2. Filter Character Repetition (e.g. "विविविवि...")
+            if len(transcription) > 10:
+                # Check if > 50% of the string is just one repeated character
+                most_common_char = max(set(transcription), key=transcription.count)
+                if transcription.count(most_common_char) / len(transcription) > 0.5:
+                     print(f"DEBUG: Filtered repetitive garbage: '{transcription}'")
+                     transcription = ""
+
             print(f"DEBUG: Transcription result: '{transcription}'")
             print(f"DEBUG: Language detected: {detected_language}")
             

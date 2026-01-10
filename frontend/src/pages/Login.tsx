@@ -44,7 +44,9 @@ const Login = () => {
       });
 
       // Conditional Navigation based on User Preference
-      if (response.data.learning_preference === "blind") {
+      if (response.data.role === "teacher") {
+        navigate("/teacher-dashboard");
+      } else if (response.data.learning_preference === "blind") {
         navigate("/blind");
       } else {
         navigate("/dashboard");

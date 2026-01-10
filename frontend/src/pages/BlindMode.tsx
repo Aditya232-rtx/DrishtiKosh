@@ -3,449 +3,356 @@ import { Link, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import Logo from "@/components/Logo";
 import { ArrowLeft, Mic, MicOff, Upload, Volume2 } from "lucide-react";
+import { motion } from "framer-motion";
 import api from "@/lib/api";
 import { auth } from "../lib/auth";
 
+// Audio Configuration
+const SAMPLE_RATE = 24000; // Gemini Live prefers 24kHz
+const CHUNK_SIZE = 4096;
+
 const BlindMode = () => {
-  const userId = auth.getUserId(); // Get authenticated user ID
+  const userId = auth.getUserId();
   const [searchParams] = useSearchParams();
   const sessionId = searchParams.get("sessionId");
-  const initialTopic = searchParams.get("topic");
-  const pendingContext = searchParams.get("pending_context");
-  const [isListening, setIsListening] = useState(false);
-  // Status for logic, but we'll stick to isListening for UI mostly or map it
-  const [status, setStatus] = useState<"idle" | "listening" | "processing" | "speaking">("idle");
-  const [transcript, setTranscript] = useState("");
-  const [aiResponse, setAiResponse] = useState("");
-  const [isPlaying, setIsPlaying] = useState(false);
 
-  // Restore Chat History state
-  const [messages, setMessages] = useState<
-    { role: "user" | "ai"; content: string }[]
-  >([
-    {
-      role: "ai",
-      content:
-        "Hi there! I'm Drishti, your AI companion. I'm here to see the world with you. When you're ready, just press the Space bar to talk, and press it again to send. I'm listening.",
-    },
-  ]);
+  const [isConnected, setIsConnected] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false); // User speaking
+  const [isAiSpeaking, setIsAiSpeaking] = useState(false); // AI speaking status
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
+  const websocketRef = useRef<WebSocket | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const serverFinishedRef = useRef(false);
 
-  // --- Logic: Audio Cues (New Feature, Hidden from UI) ---
-  const playCue = (type: "start" | "stop" | "processing") => {
-    try {
-      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
+  // Queue for playing audio chunks
+  const audioQueueRef = useRef<Float32Array[]>([]);
+  const isPlayingRef = useRef(false);
+  const nextStartTimeRef = useRef(0);
 
-      osc.connect(gain);
-      gain.connect(ctx.destination);
+  // --- Audio Output Logic ---
+  const playNextChunk = () => {
+    if (audioQueueRef.current.length === 0) {
+      isPlayingRef.current = false;
+      setIsAiSpeaking(false);
 
-      const now = ctx.currentTime;
-
-      if (type === "start") { // High Beep
-        osc.frequency.setValueAtTime(440, now);
-        osc.frequency.exponentialRampToValueAtTime(880, now + 0.1);
-        gain.gain.setValueAtTime(0.1, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
-        osc.start(now);
-        osc.stop(now + 0.1);
-      } else if (type === "stop") { // Low Beep
-        osc.frequency.setValueAtTime(880, now);
-        osc.frequency.exponentialRampToValueAtTime(440, now + 0.1);
-        gain.gain.setValueAtTime(0.1, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
-        osc.start(now);
-        osc.stop(now + 0.1);
-      } else { // Processing Hum
-        osc.frequency.setValueAtTime(220, now);
-        gain.gain.setValueAtTime(0.05, now);
-        gain.gain.linearRampToValueAtTime(0, now + 0.2);
-        osc.start(now);
-        osc.stop(now + 0.2);
+      // Auto-close if server is done
+      if (serverFinishedRef.current) {
+        stopLiveSession();
       }
-    } catch (e) {
-      console.error("Audio Context Error", e);
+      return;
+    }
+
+    isPlayingRef.current = true;
+    setIsAiSpeaking(true);
+
+    const chunk = audioQueueRef.current.shift()!;
+    const ctx = audioContextRef.current;
+
+    // Create buffer
+    const buffer = ctx.createBuffer(1, chunk.length, SAMPLE_RATE);
+    // TypeScript strictness workaround
+    buffer.copyToChannel(chunk as any, 0);
+
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+
+    // Schedule playback
+    const now = ctx.currentTime;
+    // ensure we don't schedule in the past
+    const startTime = Math.max(now, nextStartTimeRef.current);
+    source.start(startTime);
+
+    // Update next start time
+    nextStartTimeRef.current = startTime + buffer.duration;
+
+    source.onended = () => {
+      playNextChunk();
+    };
+  };
+
+  const queueAudioChunk = (data: ArrayBuffer) => {
+    // Convert 16-bit PCM to Float32
+    const int16 = new Int16Array(data);
+    const float32 = new Float32Array(int16.length);
+    for (let i = 0; i < int16.length; i++) {
+      float32[i] = int16[i] / 32768.0;
+    }
+
+    audioQueueRef.current.push(float32);
+
+    if (!isPlayingRef.current) {
+      if (audioContextRef.current) {
+        nextStartTimeRef.current = audioContextRef.current.currentTime;
+      }
+      playNextChunk();
     }
   };
 
-  const handleUploadClick = () => {
-    fileInputRef.current?.click();
-  };
+  // --- WebSocket & Recording Logic ---
+  const startLiveSession = async () => {
+    try {
+      // 1. Initialize Audio Context
+      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+      audioContextRef.current = new AudioContext({ sampleRate: SAMPLE_RATE });
 
-  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      console.log("File selected:", file.name);
-      setMessages((prev) => [...prev, { role: "ai", content: `Analyzing ${file.name}...` }]);
-      setStatus("processing");
-      playCue("processing");
+      // 2. Connect WebSocket
+      // Replace 'http' with 'ws' in base URL
+      const wsUrl = api.defaults.baseURL?.replace("http", "ws") || "ws://localhost:8001";
+      const ws = new WebSocket(`${wsUrl}/api/blind/live`);
+      websocketRef.current = ws;
 
-      const formData = new FormData();
-      formData.append('image', file);
-      if (userId) formData.append('user_id', userId); // Add authenticated user
+      ws.onopen = () => {
+        console.log("WebSocket connected");
+        setIsConnected(true);
+        startMic();
+      };
 
-      try {
-        const response = await api.post('/api/blind/interact', formData);
-        const data = response.data;
-
-        if (data.ai_response) {
-          setMessages((prev) => [...prev, { role: "ai", content: data.ai_response }]);
-          setAiResponse(data.ai_response);
-        }
-
-        if (data.audio_base64) {
-          setStatus("speaking");
-          const audioUrl = `data:audio/wav;base64,${data.audio_base64}`;
-          if (audioRef.current) {
-            audioRef.current.src = audioUrl;
-            audioRef.current.play();
-            setIsPlaying(true);
-          }
+      ws.onmessage = async (event) => {
+        if (event.data instanceof Blob) {
+          // Audio chunk from Gemini
+          const arrayBuffer = await event.data.arrayBuffer();
+          queueAudioChunk(arrayBuffer);
         } else {
-          setStatus("idle");
+          // Handle text control messages
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.type === "turn_complete") {
+              console.log("🏁 Server finished turn");
+              serverFinishedRef.current = true;
+              // If queue is already empty, close now
+              if (audioQueueRef.current.length === 0 && !isPlayingRef.current) {
+                stopLiveSession();
+              }
+            }
+          } catch (e) {
+            // Ignore non-JSON text
+          }
         }
-      } catch (err) {
-        console.error("Analysis failed", err);
-        setMessages((prev) => [...prev, { role: "ai", content: "Sorry, I encountered an error." }]);
-        setStatus("idle");
-      }
+      };
+
+      ws.onclose = () => {
+        console.log("WebSocket disconnected");
+        setIsConnected(false);
+        stopMic();
+      };
+
+      ws.onerror = (err) => {
+        console.error("WebSocket error", err);
+      };
+
+    } catch (e) {
+      console.error("Failed to start live session", e);
     }
   };
 
-  // Logic: Process Audio
-  const processAudio = async (audioBlob: Blob) => {
-    console.log(`[DEBUG] processAudio called with blob: ${audioBlob.size} bytes`);
+  // Separate stopping mic from closing connection
+  const stopListening = () => {
+    stopMic();
+    // Send end-of-input signal to backend
+    if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
+      websocketRef.current.send(JSON.stringify({ type: "input_end" }));
+    }
+  };
 
-    setMessages((prev) => [...prev, { role: "ai", content: "Thinking..." }]);
-    setStatus("processing");
-    playCue("processing");
+  const stopLiveSession = () => {
+    if (websocketRef.current) {
+      websocketRef.current.close();
+      websocketRef.current = null;
+    }
+    stopMic();
+    setIsConnected(false);
+  };
 
-    const formData = new FormData();
-    formData.append("audio", audioBlob, "voice_input.webm");
-    if (userId) formData.append("user_id", userId); // Add authenticated user
-
-    console.log(`[DEBUG] FormData created. Audio field value:`, formData.get('audio'));
-    console.log(`[DEBUG] Sending to /api/blind/interact...`);
-
+  const startMic = async () => {
     try {
-      const response = await api.post("/api/blind/interact", formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
+      if (!audioContextRef.current) return;
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          sampleRate: SAMPLE_RATE,
+          channelCount: 1,
+          echoCancellation: true,
+          autoGainControl: true,
+          noiseSuppression: true
+        }
       });
-      const data = response.data;
+      streamRef.current = stream;
 
-      console.log(`[DEBUG] Response received:`, data);
+      const source = audioContextRef.current.createMediaStreamSource(stream);
+      const processor = audioContextRef.current.createScriptProcessor(CHUNK_SIZE, 1, 1);
+      processorRef.current = processor;
 
-      setMessages(prev => prev.filter(msg => msg.content !== "Thinking..."));
+      processor.onaudioprocess = (e) => {
+        if (!websocketRef.current || websocketRef.current.readyState !== WebSocket.OPEN) return;
 
-      const userText = data.user_transcript || "(No speech detected)";
-      setMessages((prev) => [...prev, { role: "user", content: userText }]); // Always show user bubble
+        const inputData = e.inputBuffer.getChannelData(0);
 
-      if (data.ai_response) {
-        setMessages((prev) => [...prev, { role: "ai", content: data.ai_response }]);
-        setAiResponse(data.ai_response);
-      } else if (!data.user_transcript) {
-        // If no transcript and no AI response, show error
-        setMessages((prev) => [...prev, { role: "ai", content: "I couldn't hear that. Please try again." }]);
-      }
-
-      if (data.audio_base64) {
-        setStatus("speaking");
-        const audioUrl = `data:audio/wav;base64,${data.audio_base64}`;
-        if (audioRef.current) {
-          audioRef.current.src = audioUrl;
-          audioRef.current.play();
-          setIsPlaying(true);
-        }
-      } else {
-        setStatus("idle");
-      }
-
-    } catch (error) {
-      console.error("Error processing audio:", error);
-      setMessages(prev => prev.filter(msg => msg.content !== "Thinking..."));
-      setMessages((prev) => [...prev, { role: "ai", content: "Sorry, I couldn't hear that." }]);
-      setStatus("idle");
-    }
-  };
-
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-      audioChunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) audioChunksRef.current.push(event.data);
-      };
-
-      mediaRecorder.onstop = () => {
-        // Use webm as it is the standard browser recording format
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        console.log(`[DEBUG] Audio blob created: ${audioBlob.size} bytes, type: ${audioBlob.type}`);
-        console.log(`[DEBUG] Audio chunks collected: ${audioChunksRef.current.length}`);
-
-        if (audioBlob.size === 0) {
-          console.error('[ERROR] Audio blob is empty! No data was recorded.');
-          alert('No audio was recorded. Please try again and speak closer to the microphone.');
-          setStatus("idle");
-          return;
+        // Convert Float32 to Int16 PCM
+        const pcmData = new Int16Array(inputData.length);
+        for (let i = 0; i < inputData.length; i++) {
+          // Clamp and scale
+          let s = Math.max(-1, Math.min(1, inputData[i]));
+          pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
         }
 
-        processAudio(audioBlob);
-        stream.getTracks().forEach(track => track.stop());
+        websocketRef.current.send(pcmData.buffer);
       };
 
-      mediaRecorder.start();
-      setIsListening(true);
-      setStatus("listening");
-      playCue("start");
-    } catch (error) {
-      console.error("Error accessing microphone:", error);
-      alert("Microphone access denied.");
+      source.connect(processor);
+      processor.connect(audioContextRef.current.destination); // Start pipeline
+
+      setIsSpeaking(true);
+
+    } catch (e) {
+      console.error("Mic error", e);
     }
   };
 
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
-      mediaRecorderRef.current.stop();
-      setIsListening(false);
-      playCue("stop");
+  const stopMic = () => {
+    if (processorRef.current) {
+      processorRef.current.disconnect();
+      processorRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
+    }
+    setIsSpeaking(false);
+  };
+
+  // Toggle
+  const toggleSession = () => {
+    if (isConnected) {
+      stopListening();
+    } else {
+      startLiveSession();
     }
   };
 
-  const toggleListening = useCallback(() => {
-    if (status === "speaking" || status === "processing") return;
-    if (isListening) stopRecording();
-    else startRecording();
-  }, [isListening, status]);
-
-  // Logic: Keyboard Shortcut
+  // Keyboard shortcut
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === "Space") {
         e.preventDefault();
-        toggleListening();
+        toggleSession();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [toggleListening]);
-  // Speak Welcome Message on Mount
-  // Speak Welcome Message OR Restore Session
+  }, [isConnected]);
+
+  // Cleanup
   useEffect(() => {
-    const initSession = async () => {
-      if (sessionId) {
-        // Restore History
-        try {
-          const sessionRes = await api.get(`/api/learn/session/${sessionId}`);
-          const data = sessionRes.data.data;
-          if (data.blind_conversation_id) {
-            const msgsRes = await api.get(`/api/blind/messages/${data.blind_conversation_id}`);
-            const restored = msgsRes.data.map((m: any) => ({
-              role: m.role,
-              content: m.content
-            }));
-            if (restored.length > 0) setMessages(restored);
-          }
-        } catch (e) {
-          console.error("Failed to restore blind session", e);
-        }
-      } else if (initialTopic) {
-        // Start with Context
-        setMessages(prev => [...prev, { role: "user", content: initialTopic }]);
-
-        const formData = new FormData();
-        formData.append('text', initialTopic);
-        if (userId) formData.append('user_id', userId);
-
-        try {
-          const res = await api.post('/api/blind/interact', formData);
-          if (res.data.ai_response) {
-            setMessages(prev => [...prev, { role: "ai", content: res.data.ai_response }]);
-            // Play audio
-            if (res.data.audio_base64) {
-              setStatus("speaking");
-              const audioUrl = `data:audio/wav;base64,${res.data.audio_base64}`;
-              if (audioRef.current) {
-                audioRef.current.src = audioUrl;
-                audioRef.current.play();
-                setIsPlaying(true);
-              }
-            }
-          }
-        } catch (e) {
-          console.error("Failed to start context session", e);
-        }
-      } else {
-        // Default Welcome (Only if no session/topic)
-        const speakWelcome = () => {
-          const welcomeText = messages[0].content;
-          const utterance = new SpeechSynthesisUtterance(welcomeText);
-          utterance.rate = 0.9;
-
-          // Try to find a female/pleasant voice
-          const voices = window.speechSynthesis.getVoices();
-          const preferredVoice = voices.find(v =>
-            v.name.includes("Samantha") ||
-            v.name.includes("Google US English") ||
-            v.name.includes("Zira") ||
-            v.name.includes("Female")
-          );
-          if (preferredVoice) utterance.voice = preferredVoice;
-
-          window.speechSynthesis.cancel();
-          window.speechSynthesis.speak(utterance);
-        };
-
-        if (window.speechSynthesis.getVoices().length > 0) {
-          speakWelcome();
-        } else {
-          window.speechSynthesis.onvoiceschanged = speakWelcome;
-        }
-        // Play subtle cue
-        playCue("start");
-      }
-    };
-
-    initSession();
-
     return () => {
-      window.speechSynthesis.cancel();
-      window.speechSynthesis.onvoiceschanged = null;
+      stopLiveSession();
+      if (audioContextRef.current) audioContextRef.current.close();
     };
   }, []);
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="min-h-screen bg-background flex flex-col transition-colors duration-500">
       {/* Header */}
       <header className="bg-card border-b border-border p-4">
         <div className="container mx-auto flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <Link
-              to="/dashboard"
-              className="p-2 rounded-lg hover:bg-accent transition-colors"
-              aria-label="Go back to dashboard"
-            >
+            <Link to="/dashboard" className="p-2 rounded-lg hover:bg-accent transition-colors">
               <ArrowLeft className="w-5 h-5" />
             </Link>
             <Logo />
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="icon"
-              aria-label="Upload file"
-              onClick={handleUploadClick}
-            >
-              <Upload className="w-4 h-4" />
-            </Button>
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleFileChange}
-              className="hidden"
-              accept="image/*,.pdf,.doc,.docx"
-            />
-            <Button variant="outline" size="icon" aria-label="Audio settings">
-              <Volume2 className="w-4 h-4" />
-            </Button>
+            <span className="bg-red-500/10 text-red-500 text-xs px-2 py-1 rounded-full animate-pulse border border-red-500/20">
+              LIVE API
+            </span>
           </div>
         </div>
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col items-center justify-center p-8">
-        {/* Microphone Button with Ripple Effect - RESTORED */}
-        <div className="relative mb-12 flex items-center justify-center">
-          {/* Ripple Effects */}
-          {isListening && (
+      <main className="flex-1 flex flex-col items-center justify-center p-8 relative overflow-hidden">
+
+        {/* Dynamic Background */}
+        <div className={`absolute inset-0 transition-opacity duration-1000 pointer-events-none ${isAiSpeaking ? "opacity-100" : "opacity-0"}`}>
+          <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 via-purple-500/10 to-transparent animate-pulse" />
+        </div>
+
+        {/* Status Indicator */}
+        <div className="mb-12 text-center z-10">
+          <h2 className="text-4xl font-bold mb-4 tracking-tight">
+            {isConnected ? (isAiSpeaking ? "Listening..." : "Listening...") : "Tap to Connect"}
+          </h2>
+          <p className="text-xl text-muted-foreground">
+            {isConnected ? "Say anything. I'm listening." : "Press Space or tap the mic."}
+          </p>
+        </div>
+
+        {/* Visualizer / Mic Button */}
+        <div className="relative z-10">
+          {/* Ripple Rings */}
+          {isConnected && (
             <>
-              <div className="absolute w-56 h-56 rounded-full bg-primary/20 animate-pulse-ring" />
-              <div
-                className="absolute w-56 h-56 rounded-full bg-primary/15 animate-pulse-ring"
-                style={{ animationDelay: "0.3s" }}
-              />
-              <div
-                className="absolute w-56 h-56 rounded-full bg-primary/10 animate-pulse-ring"
-                style={{ animationDelay: "0.6s" }}
-              />
+              <div className="absolute -inset-4 rounded-full bg-primary/20 animate-ping opacity-75 duration-1000" />
+              <div className="absolute -inset-12 rounded-full bg-primary/10 animate-ping opacity-50 duration-2000" />
             </>
           )}
 
-          {/* Main Button */}
-          <button
-            onClick={toggleListening}
-            className={`relative z-10 w-32 h-32 rounded-full flex items-center justify-center transition-all duration-300 shadow-xl ${isListening
-              ? "bg-destructive scale-110"
-              : "bg-primary hover:bg-primary/90 hover:scale-105"
+          <div
+            className={`w-full h-full rounded-2xl flex items-center justify-center transition-all duration-500 cursor-pointer ${isConnected
+              ? isAiSpeaking
+                ? 'bg-purple-600 animate-pulse' // AI Speaking
+                : 'bg-red-500' // Listening/Connected
+              : 'bg-neutral-800 hover:bg-neutral-700'
               }`}
-            aria-label={isListening ? "Stop listening" : "Start listening"}
-            aria-pressed={isListening}
+            onClick={toggleSession}
           >
-            {isListening ? (
-              <MicOff className="w-12 h-12 text-destructive-foreground" />
-            ) : (
-              <Mic className="w-12 h-12 text-primary-foreground" />
-            )}
-          </button>
-        </div>
-
-        {/* Status Text - RESTORED */}
-        <div className="text-center mb-8">
-          <p className="text-xl font-medium text-foreground mb-2">
-            {status === "processing" ? "Thinking..." : (isListening ? "Listening..." : "Tap to speak")}
-          </p>
-          <p className="text-muted-foreground">
-            {isListening
-              ? "Listening... Press Space again to send."
-              : "Press Space to speak"}
-          </p>
-        </div>
-
-        {/* Conversation Display - RESTORED */}
-        <div className="w-full max-w-2xl space-y-4 max-h-[40vh] overflow-y-auto">
-          {messages.map((message, index) => (
-            <div
-              key={index}
-              className={`flex ${message.role === "user" ? "justify-end" : "justify-start"
-                } animate-fade-in`}
-            >
-              <div
-                className={`max-w-[80%] p-4 rounded-2xl ${message.role === "user"
-                  ? "bg-primary text-primary-foreground rounded-br-md"
-                  : "bg-card border border-border text-foreground rounded-bl-md"
-                  }`}
-              >
-                <p className="text-sm font-medium mb-1">
-                  {message.role === "user" ? "You" : "Drishti"}
-                </p>
-                <p>{message.content}</p>
-              </div>
+            <div className="flex flex-col items-center gap-6">
+              {isConnected ? (
+                <>
+                  <motion.div
+                    className="p-8 rounded-full bg-white/10 backdrop-blur-md"
+                    animate={{ scale: isAiSpeaking ? [1, 1.1, 1] : 1 }}
+                    transition={{ repeat: Infinity, duration: 2 }}
+                  >
+                    <Mic className="w-16 h-16 text-white" />
+                  </motion.div>
+                  <div className="flex flex-col items-center gap-2">
+                    <p className="text-2xl font-medium text-white">
+                      {isAiSpeaking ? "Drishti is speaking..." : "Listening..."}
+                    </p>
+                    <p className="text-white/60">Tap to stop</p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <motion.div
+                    className="p-8 rounded-full bg-white/10 backdrop-blur-md"
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                  >
+                    <MicOff className="w-16 h-16 text-white" />
+                  </motion.div>
+                  <div className="flex flex-col items-center gap-2">
+                    <p className="text-2xl font-medium text-white">Tap to connect</p>
+                    <p className="text-white/60">Press Space or tap the mic</p>
+                  </div>
+                </>
+              )}
             </div>
-          ))}
+          </div>
         </div>
+
       </main>
 
-      {/* Keyboard Shortcut Hint */}
-      <footer className="p-4 text-center">
+      {/* Footer */}
+      <footer className="p-8 text-center bg-card/50 backdrop-blur-sm border-t border-border">
         <p className="text-sm text-muted-foreground">
-          Press <kbd className="px-2 py-1 bg-card rounded border border-border text-xs">Space</kbd> to toggle microphone
+          Ultra-Low Latency Mode • Powered by Gemini Live
+        </p>
+        <p className="text-xs text-muted-foreground mt-2">
+          Press <kbd className="px-2 py-1 bg-background rounded border border-border mx-1">Space</kbd> to toggle
         </p>
       </footer>
-      <audio
-        ref={audioRef}
-        onEnded={() => { setIsPlaying(false); setStatus("idle"); }}
-        onPlay={() => { setIsPlaying(true); setStatus("speaking"); }}
-        className="hidden"
-      />
     </div>
   );
 };

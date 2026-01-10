@@ -26,13 +26,14 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
-from app.routes import chat, blind, learn, auth, user
+from app.routes import chat, blind, learn, auth, user, upload
 
 app.include_router(auth.router, prefix="/api/auth")
 app.include_router(user.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
 app.include_router(blind.router, prefix="/api")
 app.include_router(learn.router, prefix="/api")
+app.include_router(upload.router, prefix="/api")
 
 # CORS Configuration
 origins = [

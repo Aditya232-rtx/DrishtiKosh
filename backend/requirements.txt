@@ -29,6 +29,14 @@ transformers>=4.36.0
 # Audio Processing
 soundfile>=0.12.1
 pydub>=0.25.1
+librosa
+transformers
+torch
+torchaudio
+soundfile
+
+scipy>=1.11.0
+yt-dlp>=2023.12.0
 
 # Memory & Vector Storage
 memori

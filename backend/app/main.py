@@ -26,6 +26,16 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
+from fastapi.staticfiles import StaticFiles
+import os
+
+# Create static directory if it doesn't exist
+static_dir = os.path.join(os.path.dirname(__file__), "../static")
+os.makedirs(static_dir, exist_ok=True)
+
+# Mount static files
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
 from app.routes import chat, blind, learn, auth, user, upload
 
 app.include_router(auth.router, prefix="/api/auth")
@@ -61,3 +71,5 @@ def read_root():
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+# Forced reload trigger to register new endpoints

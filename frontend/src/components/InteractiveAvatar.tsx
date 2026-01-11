@@ -33,13 +33,13 @@ const InteractiveAvatar = () => {
     return (
         <div
             ref={containerRef}
-            className="w-full h-48 bg-blue-50/50 rounded-3xl border border-blue-100 flex items-center justify-center relative overflow-hidden group shadow-inner"
+            className="w-full h-full flex items-center justify-center relative overflow-hidden group"
         >
-            {/* Background Decor */}
-            <div className="absolute top-0 w-full h-full bg-[radial-gradient(circle_at_center,_white_0%,_transparent_70%)] opacity-50"></div>
+            {/* Background Decor - Made completely subtle/transparent */}
+            <div className="absolute top-0 w-full h-full bg-[radial-gradient(circle_at_center,_rgba(255,255,255,0.1)_0%,_transparent_70%)] opacity-20"></div>
 
             {/* Character SVG */}
-            <svg viewBox="0 0 200 200" className="w-40 h-40 drop-shadow-xl transition-transform hover:scale-105 duration-300">
+            <svg viewBox="0 0 200 200" className="w-52 h-52 drop-shadow-xl transition-transform hover:scale-105 duration-300">
                 {/* 1. Body/Shirt (Yellow) */}
                 <path d="M60 160 Q100 180 140 160 L140 200 L60 200 Z" fill="#FCD34D" /> {/* Yellow Shirt */}
                 <path d="M75 160 L75 200 M125 160 L125 200" stroke="#F59E0B" strokeWidth="2" opacity="0.5" /> {/* Suspenders/Detail */}

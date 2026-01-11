@@ -10,17 +10,25 @@ class AudioService:
         self.supports_fp16 = False
         print(f"Device selected: {self.device} (Whisper STT disabled)")
         self.models_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "models_data")
-        self.stt_path = os.path.join(self.models_dir, "whisper-small")
+        self.stt_path = os.path.join(self.models_dir, "whisper", "whisper")
         
         # Setup Google Cloud Credentials
-        # Use the known path if environment variable is not set
-        if "GOOGLE_APPLICATION_CREDENTIALS" not in os.environ:
-            known_key_path = "/Users/adityajadhav/Drishtii/DrishtiKosh/backend/secrets/gigshield-0a6ad93e326a.json"
-            if os.path.exists(known_key_path):
-                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = known_key_path
-                print(f"✅ Set GCP Credentials from: {known_key_path}")
+        # The environment variable should be set by python-dotenv or pydantic settings
+        cred_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+        if cred_path:
+            print(f"✅ GCP Credentials path found in env: {cred_path}")
+            if not os.path.exists(cred_path):
+                print(f"❌ WARNING: Credential file does not exist at: {cred_path}")
+        else:
+            print("⚠️  GCP Credentials env var not set.")
+            # Fallback to local .env if possible (though main.py/config.py should handle this)
+            from dotenv import load_dotenv
+            load_dotenv()
+            cred_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+            if cred_path:
+                 print(f"✅ Loaded GCP Credentials from .env: {cred_path}")
             else:
-                print("⚠️  GCP Credentials not found. TTS will fail.")
+                 print("❌ GCP Credentials still not found after loading .env.")
 
         # Initialize GCP TTS Client
         try:

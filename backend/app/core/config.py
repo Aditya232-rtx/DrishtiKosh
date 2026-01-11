@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     LOCATION: str = "us-central1"
     GOOGLE_API_KEY: Optional[str] = None
     
+    # 3D Generation
+    MESHY_API_KEY: Optional[str] = None
+    
     # JWT Auth
     SECRET_KEY: str  # Must be set in .env
     ALGORITHM: str = "HS256"

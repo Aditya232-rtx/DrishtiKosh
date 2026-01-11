@@ -131,4 +131,30 @@ class VertexService:
              print(f"Error generating video: {e}")
              return None
 
+    async def analyze_video(self, video_url: str, prompt: str):
+        """
+        Analyze video content using Gemini's multimodal capabilities.
+        Supports YouTube URLs and direct video URLs.
+        """
+        if not self.text_model:
+            return "Vertex AI not initialized."
+        try:
+            from vertexai.preview.generative_models import Part
+            
+            # Create video part from URL
+            video_part = Part.from_uri(video_url, mime_type="video/*")
+            
+            # Generate content with video + text prompt
+            response = self.text_model.generate_content([video_part, prompt])
+            return response.text
+        except Exception as e:
+            print(f"Error analyzing video: {e}")
+            # Fallback: try text-only analysis with URL context
+            try:
+                fallback_prompt = f"Analyze this video URL and provide insights: {video_url}\n\n{prompt}"
+                response = self.text_model.generate_content(fallback_prompt)
+                return response.text
+            except:
+                return f"Error analyzing video: {str(e)}"
+
 vertex_service = VertexService()

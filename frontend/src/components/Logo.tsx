@@ -19,10 +19,10 @@ const Logo = ({ size = "md", showText = true }: LogoProps) => {
   };
 
   return (
-    <img 
-      src={logoIcon} 
-      alt="DrishtiKosh Logo" 
-      className={`${sizeClasses[size]} w-auto`}
+    <img
+      src={logoIcon}
+      alt="DrishtiKosh Logo"
+      className={`${sizeClasses[size]} w-auto rounded-lg`}
     />
   );
 };

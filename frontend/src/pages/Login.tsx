@@ -49,7 +49,10 @@ const Login = () => {
         navigate("/teacher-dashboard");
       } else if (response.data.learning_preference === "blind") {
         navigate("/blind");
+      } else if (response.data.learning_preference === "deaf") {
+        navigate("/deaf-dashboard");
       } else {
+        // ADHD and other users go to standard dashboard
         navigate("/dashboard");
       }
     } catch (error: any) {

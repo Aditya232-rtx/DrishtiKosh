@@ -100,7 +100,7 @@ All colors MUST be HSL.
     --gradient-card: linear-gradient(180deg, hsl(var(--card)), hsl(var(--background)));
     --glow-primary: 0 0 40px hsl(200 98% 39% / 0.3);
     --glow-success: 0 0 30px hsl(160 84% 39% / 0.3);
-    
+
     /* Accessibility colors */
     --success: 160 84% 39%;
     --success-foreground: 160 100% 97%;
@@ -195,12 +195,51 @@ All colors MUST be HSL.
 .scrollbar-thin::-webkit-scrollbar {
   width: 6px;
 }
+
 .scrollbar-thin::-webkit-scrollbar-track {
   background: transparent;
 }
+
 .scrollbar-thin::-webkit-scrollbar-thumb {
   @apply bg-slate-300 dark:bg-slate-600 rounded-full;
 }
+
 .scrollbar-thin::-webkit-scrollbar-thumb:hover {
   @apply bg-slate-400 dark:bg-slate-500;
+}
+
+.scroll-list__wrp {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scroll-list__wrp::-webkit-scrollbar {
+  display: none;
+}
+
+/* Semantic-Emotional Captioning: Shake animation for voice tremor (jitter) */
+@keyframes shake {
+
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  25% {
+    transform: translateX(-2px);
+  }
+
+  50% {
+    transform: translateX(0);
+  }
+
+  75% {
+    transform: translateX(2px);
+  }
+}
+
+/* Acoustic text styling */
+.acoustic-text {
+  display: inline-block;
+  transition: all 0.3s ease-in-out;
 }

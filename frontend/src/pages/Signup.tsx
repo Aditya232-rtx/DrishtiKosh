@@ -83,8 +83,10 @@ const Signup = () => {
         navigate("/teacher-dashboard");
       } else if (formData.disability === "blind") {
         navigate("/blind");
+      } else if (formData.disability === "deaf") {
+        navigate("/deaf-dashboard");
       } else {
-        // ADHD and Deaf users go to dashboard first
+        // ADHD and other users go to standard dashboard
         navigate("/dashboard");
       }
     } catch (error: any) {

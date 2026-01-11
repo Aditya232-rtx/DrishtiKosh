@@ -14,6 +14,7 @@ from app.models.learning_session import LearningSession, SessionType, SessionSta
 from app.models.quiz_progress import QuizProgress
 from datetime import datetime
 import uuid
+import re
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -40,14 +41,34 @@ class QuizQuestion(BaseModel):
     question: str
     options: List[str]
     correct: int
-    explanation: str # New field for reasoning
+    explanation: str 
 
 class ExplainResponse(BaseModel):
     slides: List[Slide]
     quiz: List[QuizQuestion]
-    image: Optional[str] = None  # Deprecated (keeps backward compatibility)
-    images: List[str] = []       # New: List of 4 generated images
-    session_id: Optional[str] = None  # Session ID for polling
+    image: Optional[str] = None
+    images: List[str] = []
+    image_prompt: Optional[str] = None
+    
+    # Deaf Mode Entitlements
+    flashcards: Optional[List[dict]] = None
+    flowchart: Optional[str] = None
+    model_url: Optional[str] = None
+    
+    session_id: Optional[str] = None
+
+# Video Analysis Models
+class EmotionalSegment(BaseModel):
+    text: str
+    loudness: str
+    pitch: str
+    speed: str
+    timestamp: Optional[float] = None
+    metrics: Optional[dict] = None
+
+class Flashcard(BaseModel):
+    front: str
+    back: str
 
 class VideoAnalysisRequest(BaseModel):
     url: str
@@ -55,14 +76,18 @@ class VideoAnalysisRequest(BaseModel):
     instruction: Optional[str] = None
     user_id: str = "guest"
 
+class VideoAnalysisResponse(BaseModel):
+    transcript: List[EmotionalSegment]
+    flashcards: List[Flashcard]
+    flowchart: str
+    quiz: List[QuizQuestion]
+
 class ChatRequest(BaseModel):
     message: str
     context: Optional[str] = None
     user_id: str = "guest"
-    # New: Accept GCS file info
     file_uri: Optional[str] = None
     file_mime: Optional[str] = None
-
 
 class FlowchartRequest(BaseModel):
     topic: str
@@ -82,6 +107,20 @@ class FlowchartResponse(BaseModel):
     nodes: List[FlowNode]
     notes: List[FlowNote]
     summary: str
+    chart: Optional[str] = None
+
+class FlashcardRequest(BaseModel):
+    topic: str
+    user_id: str = "guest"
+
+class LogRequest(BaseModel):
+    message: str
+    level: str = "info"
+
+class ThreeDModelRequest(BaseModel):
+    topic: str
+    prompt: Optional[str] = None
+    image_url: Optional[str] = None
 
 # --- Endpoints ---
 
@@ -92,7 +131,6 @@ async def learn_chat(req: ChatRequest, db: Session = Depends(get_db)):
     Answers doubts using personalized prompt settings.
     """
     try:
-        # 1. Personalize Prompt
         user_uuid = req.user_id if req.user_id != "guest" else None
         
         base_prompt = f"""
@@ -105,10 +143,8 @@ async def learn_chat(req: ChatRequest, db: Session = Depends(get_db)):
         Do not use asterisks (*) in your response.
         """
         
-        # FIX: personalize_prompt is synchronous and args were wrong order
         prompt = personalize_prompt(base_prompt, req.user_id, db, context="conversation")
         
-        # 2. Call Vertex AI
         files = []
         if req.file_uri and req.file_mime:
              files.append({"uri": req.file_uri, "mime_type": req.file_mime})
@@ -152,7 +188,6 @@ async def get_history(user_id: str = "guest", db: Session = Depends(get_db)):
         if user_uuid:
             query = query.filter(LearningSession.user_id == user_uuid)
         items = query.order_by(LearningSession.created_at.desc()).limit(50).all()
-        # Return lightweight history (exclude 'content_data' to save bandwidth)
         return [
             {
                 "id": str(item.id),
@@ -160,7 +195,7 @@ async def get_history(user_id: str = "guest", db: Session = Depends(get_db)):
                 "preview": item.preview,
                 "type": item.type.value,
                 "timestamp": item.created_at.isoformat(),
-                "date": "Today" # Backward compat
+                "date": "Today"
             } for item in items
         ]
     except Exception as e:
@@ -182,7 +217,6 @@ async def get_session(session_id: str, db: Session = Depends(get_db)):
         "status": item.status.value
     }
 
-# Background Video Generation Function
 async def generate_video_background(
     session_id: str,
     topic: str,
@@ -200,16 +234,13 @@ async def generate_video_background(
         
         print(f"🎥 Starting background video generation for session {session_id}")
         
-        # Create content summary from first 3 slides
         summary_lines = []
         for slide in slides[:3]:
             summary_lines.append(f"• {slide.get('title', 'Point')}: {slide.get('content', '')[:100]}")
         content_summary = "\n".join(summary_lines)
         
-        # Get user interest for personalization
         user_interest = get_user_interest(user_id, db_session) if user_id != "guest" else "default"
         
-        # Generate 8-second video
         video_b64 = await video_service.generate_video_summary(
             topic=topic,
             content_summary=content_summary,
@@ -217,35 +248,30 @@ async def generate_video_background(
             duration=8
         )
         
-        # Mark session as failed immediately to stop frontend polling
         session = db_session.query(LearningSession).filter(
              LearningSession.id == uuid.UUID(session_id)
         ).first()
 
         if not video_b64:
-            # Mark session as failed immediately to stop frontend polling
             session = db_session.query(LearningSession).filter(
                  LearningSession.id == uuid.UUID(session_id)
             ).first()
 
             if session:
-                 # Mark video as failed in content_data w/o failing session
                  content_data = session.content_data or {}
                  content_data["video_status"] = "failed"
                  session.content_data = content_data
                  flag_modified(session, "content_data")
                  
                  db_session.commit()
-                 print(f"❌ Session {session_id} video generation FAILED (or returned None)")
+                 print(f"❌ Session {session_id} video generation FAILED")
         else:
             if session:
-                # Update content_data JSON with video
                 content_data = session.content_data or {}
                 content_data["video_summary"] = video_b64
                 content_data["video_status"] = "completed"
                 session.content_data = content_data
                 
-                # Mark as updated (tell SQLAlchemy JSON changed)
                 flag_modified(session, "content_data")
                 db_session.commit()
                 
@@ -266,19 +292,16 @@ async def explain_topic(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
-    # 1. Get System Prompt from Brain
     from app.brain import brain
     
     # 2. Text Explanation (Slides + Quiz)
     if body.is_video:
-        # User provided a YouTube URL
         prompt = brain.get_system_prompt(body.mode, "General", "video_analysis", user_instruction=body.instruction)
         prompt += f"\n\nAnalyze this YouTube Video URL: {body.topic}\n"
         prompt += "Instruction: Use your internal knowledge of this YouTube video (title, transcripts, metadata) to Analyze it."
         prompt += " If you cannot 'watch' it directly, Infer the educational content from the likely topic of this URL."
         prompt += " Create educational slides and a quiz based on this analysis."
     else:
-        # Standard Topic Explanation
         prompt = brain.get_system_prompt(body.mode, "General", "explanation", user_instruction=body.instruction)
         prompt += f"\n\nTopic: {body.topic}\n"
         prompt += "Create 3-5 slides and 2 quiz questions."
@@ -302,11 +325,25 @@ async def explain_topic(
     }
     """
     
-    # Personalize the prompt based on user interest
+    # DEAF MODE SPECIFIC PROMPT INJECTION
+    if body.mode == "deaf":
+        prompt += """
+        ALSO generate:
+        3. "flashcards": 5 key terms with "front" and "back".
+        4. "flowchart": A valid Mermaid JS graph TD string ensuring node labels are quoted.
+        
+        Update JSON structure:
+        {
+          "slides": [...],
+          "quiz": [...],
+          "flashcards": [{"front": "...", "back": "..."}],
+          "flowchart": "graph TD\\n..."
+        }
+        """
+
     if body.user_id and body.user_id != "guest":
         prompt = personalize_prompt(prompt, body.user_id, db, context="explanation")
         
-        # Also personalize quiz generation
         quiz_personalization = personalize_prompt(
             "Generate quiz questions.",
             body.user_id,
@@ -316,17 +353,14 @@ async def explain_topic(
         prompt += f"\n{quiz_personalization}"
 
     try:
-        # If it's a video, pass the URL for VLM analysis
         video_uri = body.topic if body.is_video else None
         
-        # Normalize Short URLs (youtu.be) to Full URLs (youtube.com) for Vertex AI
         if video_uri and "youtu.be/" in video_uri:
             video_id = video_uri.split("youtu.be/")[-1].split("?")[0]
             video_uri = f"https://www.youtube.com/watch?v={video_id}"
             
         print(f"📺 Processing Video URI: {video_uri}") 
 
-        # Handle File Context
         files = []
         if body.file_uri and body.file_mime:
              print(f"DEBUG: Adding Explain context file: {body.file_uri}")
@@ -339,52 +373,66 @@ async def explain_topic(
         try:
             data = json.loads(clean_text)
         except json.JSONDecodeError:
-            # Fallback for malformed JSON
             print(f"❌ JSON Decode Error. Raw text: {clean_text[:100]}...")
             raise HTTPException(status_code=500, detail="Failed to parse AI response")
         
-        # 3. Enhanced Image Generation (4 Images)
-        image_prompts = data.get("image_prompts", [])
-        
-        # Fallback if AI didn't return prompts
-        if not image_prompts:
-            base_prompt = f"Educational illustration of {body.topic}, {body.mode} style"
-            image_prompts = [
-                f"{base_prompt} - Concept 1 overview",
-                f"{base_prompt} - Detailed diagram",
-                f"{base_prompt} - Real world application",
-                f"{base_prompt} - creative analogy"
-            ]
+        # --- DEAF MODE: 3D Model & Parsing ---
+        if body.mode == "deaf":
+            from app.services.meshy import meshy_service
+            
+            # 1. 3D Model Generation (Background/Parallel)
+            print(f"🧊 Generating 3D Model for Deaf Mode: {body.topic}")
+            try:
+                # We await here, but ideally this could be a background task if latency is high.
+                # For now, we wait to populate the response.
+                model_url = await meshy_service.generate_3d_model_from_text(f"Educational model of {body.topic}")
+                data["model_url"] = model_url
+            except Exception as e:
+                print(f"⚠️ 3D Model Generation Failed: {e}")
+                data["model_url"] = None
+                
+            # 2. Extract Deaf-specific fields
+            data["flashcards"] = data.get("flashcards", [])
+            data["flowchart"] = data.get("flowchart", None)
+            
+            # Deaf users might still want ONE image context
+            image_prompts = [f"Educational illustration of {body.topic}, clear and descriptive"]
+            
+        else:
+             # ADHD/General Mode: 4-Image Logic
+             image_prompts = data.get("image_prompts", [])
+             
+             # Fallback if AI didn't return prompts
+             if not image_prompts:
+                base_prompt = f"Educational illustration of {body.topic}, {body.mode} style"
+                image_prompts = [
+                    f"{base_prompt} - Concept 1 overview",
+                    f"{base_prompt} - Detailed diagram",
+                    f"{base_prompt} - Real world application",
+                    f"{base_prompt} - creative analogy"
+                ]
             
         # Ensure we have at least 4 prompts
         while len(image_prompts) < 4:
             image_prompts.append(f"Educational illustration of {body.topic} - key concept {len(image_prompts)+1}")
             
-        # Personalize prompts
         final_image_prompts = []
         for p in image_prompts[:4]: # Limit to 4
             p_final = p
             if body.mode == "adhd":
                 p_final += " Vibrant, infographic style, minimal clutter."
-            if body.user_id and body.user_id != "guest":
-                # Light personalization for style without full overhead
-                # We skip full personalize_prompt calls per image to save latency
-                pass 
             final_image_prompts.append(p_final)
 
-        # Generate images in parallel
         print(f"🎨 Generating {len(final_image_prompts)} images...")
         image_tasks = [vertex_service.generate_image_base64(p) for p in final_image_prompts]
         generated_images = await asyncio.gather(*image_tasks)
         
-        # Filter failures (None)
         valid_images = [img for img in generated_images if img]
         
         data["images"] = valid_images
-        # Set primary image for backward compatibility
         data["image"] = valid_images[0] if valid_images else None
-        
-        # Save History to DB and get session_id
+        data["image_prompt"] = final_image_prompts[0] if final_image_prompts else image_prompts[0] if image_prompts else None
+
         session_id = save_history_entry_db(
             db=db,
             title=body.topic, 
@@ -394,72 +442,83 @@ async def explain_topic(
             user_id=body.user_id
         )
         
-        # Start background video generation
-        if session_id:
-            background_tasks.add_task(
-                generate_video_background,
-                session_id=session_id,
-                topic=body.topic,
-                slides=data["slides"],
-                user_id=body.user_id or "guest",
-                db_session=db
-            )
-            print(f"🚀 Background video generation started for session {session_id}")
+        # Background Video Generation (ADHD Mode Only)
+        if body.mode == "adhd" and session_id:
+             print(f"⏩ Scheduling background video generation for session {session_id}")
+             background_tasks.add_task(
+                 generate_video_background,
+                 session_id=session_id,
+                 topic=body.topic,
+                 slides=data["slides"],
+                 user_id=body.user_id,
+                 db_session=db 
+             )
         
-        # Return response
         return {
             "slides": data["slides"],
             "quiz": data["quiz"],
             "image": data["image"],
             "images": data["images"],
-            "session_id": session_id
+            "session_id": session_id,
+            "flashcards": data.get("flashcards"),
+            "flowchart": data.get("flowchart"),
+            "model_url": data.get("model_url")
         }
     except Exception as e:
         logger.error(f"Error explaining topic: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
-
 @router.post("/learn/flowchart", response_model=FlowchartResponse)
 async def generate_flowchart(request: FlowchartRequest):
     prompt = f"""
-    Create a hierarchical flowchart for the topic '{request.topic}'.
-    Return strictly valid JSON with this structure:
-    {{
-      "nodes": [
-        {{"id": 1, "title": "Main Topic", "level": 0, "parent": null}},
-        {{"id": 2, "title": "Subtopic", "level": 1, "parent": 1}}
-      ],
-      "notes": [
-        {{"id": 1, "title": "Key Concept", "content": "Short note."}}
-      ],
-      "summary": "Brief summary of the structure."
-    }}
-    Ensure the JSON is raw and not wrapped in markdown code blocks.
+    Create a flowchart for the topic '{request.topic}' using Mermaid JS syntax.
+    Return strictly valid Mermaid code starting with `graph TD`.
+    CRITICAL SYNTAX RULES:
+    1. Every node label MUST be enclosed in double quotes.
+    2. Do NOT use parentheses ( ) inside the node IDs.
+    3. Use <br/> for line breaks inside the quoted labels.
+    4. Escape any inner double quotes with backslash.
     """
     
     try:
         response_text = await vertex_service.generate_text(prompt)
-        clean_text = response_text.replace("```json", "").replace("```", "").strip()
-        data = json.loads(clean_text)
-        return data
+        match = re.search(r"(graph|flowchart)\s+[a-zA-Z0-9]+", response_text, re.IGNORECASE)
+        
+        if match:
+            clean_text = response_text[match.start():]
+            clean_text = clean_text.replace("```", "").strip()
+        else:
+             clean_text = response_text.replace("```mermaid", "").replace("```", "").strip()
+             if not clean_text.lower().startswith("graph") and not clean_text.lower().startswith("flowchart"):
+                clean_text = "graph TD\n" + clean_text
+             
+        return {
+            "nodes": [], 
+            "notes": [], 
+            "summary": "Generated Diagram",
+            "chart": clean_text # Frontend seems to expect this field based on usage, or we fix the model
+        } 
+        # WAIT: FlowchartResponse model used in v3 snippet had nodes/notes/summary.
+        # But my generate_flowchart returned {"chart": clean_text} previously.
+        # The user's v3 snippet showed FlowchartRequest but I don't see generate_flowchart usage.
+        # I will return both to be safe, but FlowchartResponse implies structured data.
+        # Actually my previous code returned {"chart": ...} but used `response_model=FlowchartResponse`? 
+        # That would fail validtion if mismatched.
+        # Let's check my previous code.
+        # Code in Step 2440 had `async def generate_flowchart(request: FlowchartRequest):` WITHOUT response_model.
+        # So it returned a dict.
+        # I will remove response_model from decorator to avoid validation error if I return raw chart.
     except Exception as e:
         logger.error(f"Error generating flowchart: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# Video Summary Generation
 class VideoSummaryRequest(BaseModel):
-    session_id: str  # Learning session ID to create video from
+    session_id: str
     user_id: str = "guest"
 
 @router.post("/learn/video-summary")
 async def generate_video_summary(request: VideoSummaryRequest, db: Session = Depends(get_db)):
-    """
-    Generate a 30-second video summary using Google Veo 3
-    Based on a completed learning session
-    """
     try:
-        # Fetch the learning session
         session = db.query(LearningSession).filter(
             LearningSession.id == uuid.UUID(request.session_id)
         ).first()
@@ -467,35 +526,30 @@ async def generate_video_summary(request: VideoSummaryRequest, db: Session = Dep
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
         
-        # Extract content for video generation
         content_data = session.content_data or {}
         slides = content_data.get("slides", [])
         
         if not slides:
             raise HTTPException(status_code=400, detail="No content available for video generation")
         
-        # Create summary text from slides
         summary_lines = []
-        for slide in slides[:3]:  # First 3 slides for 30s video
+        for slide in slides[:3]: 
             summary_lines.append(f"• {slide.get('title', 'Point')}: {slide.get('content', '')[:100]}")
         
         content_summary = "\n".join(summary_lines)
         
-        # Get user interest for personalization
         from app.core.utils import get_user_interest
         user_interest = get_user_interest(request.user_id, db) if request.user_id != "guest" else "default"
         
-        # Generate video using Veo 3
         from app.services.video import video_service
         video_b64 = await video_service.generate_video_summary(
             topic=session.title,
             content_summary=content_summary,
             user_interest=user_interest,
-            duration=8  # Veo maximum: 8 seconds
+            duration=8 
         )
         
         if not video_b64:
-            # Gracefully handle when Veo 3 API is not available yet
             return {
                 "success": False,
                 "message": "Video generation is coming soon! Veo 3 API access pending.",
@@ -503,7 +557,6 @@ async def generate_video_summary(request: VideoSummaryRequest, db: Session = Dep
                 "topic": session.title
             }
         
-        # Update session with video
         if not session.content_data:
             session.content_data = {}
         session.content_data["video_summary"] = video_b64
@@ -519,4 +572,108 @@ async def generate_video_summary(request: VideoSummaryRequest, db: Session = Dep
         
     except Exception as e:
         logger.error(f"Error generating video summary: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/learn/log")
+async def log_frontend_message(body: LogRequest):
+    prefix = "🌐 [Frontend]:"
+    if body.level == "error":
+        print(f"❌ {prefix} {body.message}")
+    else:
+        print(f"ℹ️ {prefix} {body.message}")
+    return {"status": "logged"}
+
+@router.post("/learn/flashcards")
+async def generate_flashcards(request: FlashcardRequest, db: Session = Depends(get_db)):
+    from app.services.vertex import vertex_service
+    prompt = f"Create 6 educational flashcards about '{request.topic}'. "
+    prompt += "Each flashcard should have a 'front' (question/term) and 'back' (answer/definition). "
+    prompt += """
+    Output strictly valid JSON:
+    [
+      {"front": "...", "back": "..."},
+      {"front": "..."}
+    ]
+    """
+    try:
+        response_text = await vertex_service.generate_text(prompt)
+        clean_text = response_text.replace("```json", "").replace("```", "").strip()
+        data = json.loads(clean_text)
+        return data
+    except Exception as e:
+        logger.error(f"Error generating flashcards: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/learn/3d_model")
+async def generate_3d_model(request: ThreeDModelRequest):
+    from app.services.meshy import meshy_service
+    prompt = request.prompt or f"A detailed 3D model of {request.topic}, educational, realistic texturing"
+    
+    if request.image_url:
+        model_url = await meshy_service.generate_3d_model_from_image(request.image_url)
+    else:
+        model_url = await meshy_service.generate_3d_model_from_text(prompt)
+        
+    if not model_url:
+        raise HTTPException(status_code=500, detail="Failed to generate 3D model")
+        
+    return {"model_url": model_url}
+
+@router.post("/learn/analyze_video_emotional", response_model=VideoAnalysisResponse)
+@limiter.limit("3/minute")
+async def analyze_video_emotional(
+    request: Request,
+    body: VideoAnalysisRequest,
+    db: Session = Depends(get_db)
+):
+    from app.brain import brain
+    from app.services.vertex import vertex_service
+    import re
+    
+    try:
+        video_title = "Video Content"
+        video_description = ""
+        
+        if "youtube.com" in body.url or "youtu.be" in body.url:
+            youtube_match = re.search(r'(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})', body.url)
+            if youtube_match:
+                video_id = youtube_match.group(1)
+                video_title = f"YouTube Video: {video_id}"
+        
+        system_prompt = brain.get_system_prompt(
+            user_mode="deaf",
+            user_interests=get_user_interest(body.user_id, db) if body.user_id != "guest" else "General Knowledge",
+            task_type="video_analysis"
+        )
+        
+        user_prompt = f"""
+Analyze this video and provide comprehensive learning content:
+VIDEO URL: {body.url}
+
+Strict JSON output:
+{{
+  "transcript": [{{"text": "...", "loudness": "normal", "pitch": "normal", "speed": "normal"}}],
+  "flashcards": [{{"front": "...", "back": "..."}}],
+  "flowchart": "graph TD\\n...",
+  "quiz": [{{"question": "...", "options": [], "correct": 0, "explanation": "..."}}]
+}}
+"""
+        logger.info(f"Analyzing video content: {body.url}")
+        response_text = await vertex_service.analyze_video(body.url, system_prompt + "\n\n" + user_prompt)
+        clean_text = response_text.replace("```json", "").replace("```", "").strip()
+        data = json.loads(clean_text)
+        
+        transcript = [EmotionalSegment(**seg) for seg in data.get("transcript", [])]
+        flashcards = [Flashcard(**card) for card in data.get("flashcards", [])]
+        flowchart = data.get("flowchart", "graph TD\n  A[Video Content]")
+        quiz = [QuizQuestion(**q) for q in data.get("quiz", [])]
+        
+        return {
+            "transcript": transcript,
+            "flashcards": flashcards,
+            "flowchart": flowchart,
+            "quiz": quiz
+        }
+    except Exception as e:
+        logger.error(f"Video analysis failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))

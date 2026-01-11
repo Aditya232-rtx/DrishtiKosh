@@ -9,8 +9,11 @@ import Signup from "./pages/Signup";
 import About from "./pages/About";
 import Dashboard from "./pages/Dashboard";
 import TeacherDashboard from "./pages/TeacherDashboard";
+import DeafDashboard from "./pages/DeafDashboard";
 import BlindMode from "./pages/BlindMode";
 import LearnMode from "./pages/LearnMode";
+import DeafLearnMode from "./pages/DeafLearnMode";
+import DeafVideoMode from "./pages/DeafVideoMode";
 import Flowchart from "./pages/Flowchart";
 import NotFound from "./pages/NotFound";
 
@@ -34,8 +37,11 @@ const App = () => (
               <Route path="/about" element={<About />} />
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/teacher-dashboard" element={<TeacherDashboard />} />
+              <Route path="/deaf-dashboard" element={<DeafDashboard />} />
               <Route path="/blind" element={<BlindMode />} />
               <Route path="/learn" element={<LearnMode />} />
+              <Route path="/deaf-learn" element={<DeafLearnMode />} />
+              <Route path="/deaf-video" element={<DeafVideoMode />} />
               <Route path="/flowchart" element={<Flowchart />} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />

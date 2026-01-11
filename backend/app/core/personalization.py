@@ -115,9 +115,27 @@ EXAMPLES:
 - Explaining variables: "Variables are like ingredient containers - they hold values"
 - Explaining loops: "Loops are like stirring until the sauce thickens"
 """
+            if has_interest("sport") or has_interest("football") or has_interest("cricket"):
+                analogy_examples += """
+- Explaining forces: "Think of force like a player kicking a ball - mass of ball * acceleration of kick"
+- Explaining momentum: "Momentum is like a heavy player running fast - hard to stop"
+"""
+            if has_interest("art") or has_interest("paint") or has_interest("design"):
+                analogy_examples += """
+- Explaining structure: "Think of code structure like composition in a painting - balance and flow matter"
+- Explaining layers: "Layers in code are like layers in Photoshop - building complexity from base elements"
+"""
+            if has_interest("tech") or has_interest("gadget"):
+                analogy_examples += """
+- Explaining CPU: "The CPU is like the engine of a car or the brain of a smartphone"
+- Explaining memory: "RAM is like your workbench space, while Storage is like your filing cabinet"
+"""
             
             analogy_examples += f"""
-INSTRUCTION: When explaining any concept, ALWAYS relate it to {preferred_analogies} using concrete examples.
+INSTRUCTION: When explaining concepts:
+1. FIRST, explain the concept using FACTUAL, ACCURATE technical terms.
+2. SECOND, relate it to {preferred_analogies} using a concrete analogy to reinforce understanding.
+3. NEVER use the analogy as the ONLY explanation.
 """
         
         # Assemble final system instruction

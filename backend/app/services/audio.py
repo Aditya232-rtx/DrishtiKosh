@@ -1,25 +1,14 @@
-from transformers import AutoTokenizer, AutoModelForSpeechSeq2Seq, AutoProcessor
-# Parler TTS removed
-import torch
+# from transformers import AutoTokenizer, AutoModelForSpeechSeq2Seq, AutoProcessor
+# import torch
 import soundfile as sf
 import os
 from google.cloud import texttospeech
 
 class AudioService:
     def __init__(self):
-        # Improved device detection for macOS support
-        if torch.cuda.is_available():
-            self.device = "cuda:0"
-            self.supports_fp16 = True
-        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-            # Apple Silicon Mac with Metal Performance Shaders
-            self.device = "mps"
-            self.supports_fp16 = False  # MPS doesn't support fp16 in Whisper well
-        else:
-            self.device = "cpu"
-            self.supports_fp16 = False
-        
-        print(f"Device selected: {self.device} (fp16 support: {self.supports_fp16})")
+        self.device = "cpu"
+        self.supports_fp16 = False
+        print(f"Device selected: {self.device} (Whisper STT disabled)")
         self.models_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "models_data")
         self.stt_path = os.path.join(self.models_dir, "whisper-small")
         
@@ -57,28 +46,9 @@ class AudioService:
             'as': 'bn-IN-Wavenet-A',    # Fallback to Bengali
         }
 
-        # Load STT (Whisper - OpenAI Implementation)
-        print(f"DEBUG: resolving STT path: {self.stt_path}")
-        
-        # Check if the path points to a file (small.pt) or directory
-        # If directory, look for small.pt inside
-        self.stt_model_file = self.stt_path
-        if os.path.isdir(self.stt_path):
-             self.stt_model_file = os.path.join(self.stt_path, "small.pt")
-
-        if os.path.exists(self.stt_model_file):
-            try:
-                import whisper
-                print(f"Loading Whisper Model from: {self.stt_model_file}")
-                # Load the model directly from the .pt file
-                self.stt_model = whisper.load_model(self.stt_model_file, device=self.device)
-                print("✅ STT Model loaded successfully (OpenAI Whisper).")
-            except Exception as e:
-                print(f"❌ Failed to load Whisper model: {e}")
-                self.stt_model = None
-        else:
-            print(f"❌ CRITICAL: Whisper model file not found at: {self.stt_model_file}")
-            self.stt_model = None
+        # Whisper STT Removed as per user request
+        self.stt_model = None
+        print("ℹ️ Whisper STT is disabled.")
         
         # EXPLICIT LANGUAGE SUPPORT - Only these 12 languages are targeted
         self.SUPPORTED_LANGUAGES = {
@@ -158,96 +128,6 @@ class AudioService:
 
     async def speech_to_text(self, audio_bytes: bytes, language_hint: str = None):
         """Transcribe audio with automatic language detection and multilingual support"""
-        if not self.stt_model:
-            return {"text": "STT Model not available", "language": "unknown"}
-        
-        import io
-        import soundfile as sf
-        import numpy as np
-        import tempfile
-        import re
-        
-        print(f"DEBUG: Received audio bytes: {len(audio_bytes)} bytes")
-        
-        temp_path = None
-        try:
-            # Try to detect if this is WebM format (browsers often record in WebM)
-            is_webm = audio_bytes[:4] == b'\x1a\x45\xdf\xa3'
-            
-            # Convert to WAV format and save to temp file
-            if is_webm:
-                print("DEBUG: Detected WebM format, converting to WAV...")
-                try:
-                    from pydub import AudioSegment
-                    audio = AudioSegment.from_file(io.BytesIO(audio_bytes), format="webm")
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
-                        audio.export(temp_audio.name, format="wav")
-                        temp_path = temp_audio.name
-                except Exception as conv_error:
-                    print(f"DEBUG: WebM conversion failed: {conv_error}")
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
-                        temp_audio.write(audio_bytes)
-                        temp_path = temp_audio.name
-            else:
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
-                    temp_audio.write(audio_bytes)
-                    temp_path = temp_audio.name
-            
-            # WHISPER TRANSCRIBE
-            print("DEBUG: Starting Whisper transcription...")
-            result = self.stt_model.transcribe(
-                temp_path,
-                language=None, # Auto-detect
-                task="transcribe",
-                fp16=False,
-                beam_size=5,
-                best_of=5,
-                temperature=0.0,
-                condition_on_previous_text=False # Prevent hallucination loops from prev context
-            )
-            
-            transcription = result["text"].strip()
-            detected_language = result.get("language", "unknown")
-            
-            # --- HALLUCINATION & REPETITION FILTER ---
-            
-            # 1. Filter Repetitive Loops (e.g. "To subscribe...", "Copyright...", "Amara.org")
-            hallucinations = [
-                "subscribe", "copyright", "amara.org", "thank you", "watching"
-            ]
-            if any(h in transcription.lower() for h in hallucinations) and len(transcription) < 40:
-                 print(f"DEBUG: Filtered known hallucination: '{transcription}'")
-                 transcription = ""
-
-            # 2. Filter Character Repetition (e.g. "विविविवि...")
-            if len(transcription) > 10:
-                # Check if > 50% of the string is just one repeated character
-                most_common_char = max(set(transcription), key=transcription.count)
-                if transcription.count(most_common_char) / len(transcription) > 0.5:
-                     print(f"DEBUG: Filtered repetitive garbage: '{transcription}'")
-                     transcription = ""
-
-            print(f"DEBUG: Transcription result: '{transcription}'")
-            print(f"DEBUG: Language detected: {detected_language}")
-            
-            return {
-                "text": transcription,
-                "language": detected_language,
-                "language_name": self.SUPPORTED_LANGUAGES.get(detected_language, {}).get('name', detected_language.title()),
-                "script": self.SUPPORTED_LANGUAGES.get(detected_language, {}).get('script', 'Unknown'),
-                "font_hint": self.SUPPORTED_LANGUAGES.get(detected_language, {}).get('font_hint', 'Roboto')
-            }
-            
-        except Exception as e:
-            print(f"STT Error: {e}")
-            import traceback
-            traceback.print_exc()
-            return {"text": "Error transcribing audio", "language": "unknown", "error": str(e)}
-        finally:
-            if temp_path and os.path.exists(temp_path):
-                try:
-                    os.unlink(temp_path)
-                except Exception:
-                    pass
+        return {"text": "STT Disabled", "language": "unknown", "error": "Whisper is disabled"}
 
 audio_service = AudioService()

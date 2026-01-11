@@ -2,16 +2,18 @@ import { useState, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import Logo from "@/components/Logo";
-import { Upload, FileText, User, Activity, Clock, LogOut, Loader2 } from "lucide-react";
+import { Upload, FileText, User, Activity, Clock, LogOut, Loader2, BarChart3 } from "lucide-react";
 import { auth } from "../lib/auth";
 import api from "../lib/api";
 import { toast } from "@/hooks/use-toast";
 import { ThemeToggleButton } from "@/components/ThemeToggleButton";
+import { TeacherAnalytics } from "@/components/TeacherAnalytics";
 
 const TeacherDashboard = () => {
     const navigate = useNavigate();
     const userName = auth.getUserName() || "Teacher";
     const [isUploading, setIsUploading] = useState(false);
+    const [showAnalytics, setShowAnalytics] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const handleSignOut = () => {
@@ -66,6 +68,15 @@ const TeacherDashboard = () => {
                         </span>
                     </div>
                     <div className="flex items-center gap-4">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setShowAnalytics(true)}
+                            className="hidden sm:flex items-center gap-2"
+                        >
+                            <BarChart3 className="w-4 h-4" />
+                            Analytics
+                        </Button>
                         <div className="text-sm text-right hidden sm:block">
                             <p className="font-medium text-foreground">{userName}</p>
                             <p className="text-xs text-muted-foreground">Instructor</p>
@@ -215,6 +226,9 @@ const TeacherDashboard = () => {
                     </div>
                 </section>
             </main>
+
+            {/* Teacher Analytics Modal */}
+            <TeacherAnalytics isOpen={showAnalytics} onClose={() => setShowAnalytics(false)} />
         </div >
     );
 };

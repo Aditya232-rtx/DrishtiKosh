@@ -31,6 +31,9 @@ import {
 } from "lucide-react";
 
 import { ThemeToggleButton } from "@/components/ThemeToggleButton";
+import { CourseCard } from "@/components/CourseCard";
+import { Analytics } from "@/components/Analytics";
+import { ChallengeModal } from "@/components/ChallengeModal";
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -48,6 +51,8 @@ const Dashboard = () => {
   const [streak, setStreak] = useState<any>(null);
   const [goals, setGoals] = useState<any[]>([]);
   const [achievements, setAchievements] = useState<any[]>([]);
+  const [showAnalytics, setShowAnalytics] = useState(false);
+  const [showChallenge, setShowChallenge] = useState(false);
 
   const [learningHistory, setLearningHistory] = useState<any[]>([]);
   const [uploadContext, setUploadContext] = useState<{ uri: string, mime: string, name: string } | null>(null);
@@ -427,6 +432,50 @@ const Dashboard = () => {
             {/* Response Section Removed - Redirects to LearnMode */}
 
           </div>
+
+          {/* Courses Section */}
+          <div className="mb-12">
+            <h2 className="text-lg font-semibold text-foreground mb-4">
+              My Courses
+            </h2>
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <CourseCard
+                title="Physics"
+                description="Mechanics, Thermodynamics, Electromagnetism"
+                progress={65}
+              />
+              <CourseCard
+                title="Chemistry"
+                description="Thermodynamics, Organic Chemistry"
+                progress={45}
+              />
+              <CourseCard
+                title="History"
+                description="World Wars, Ancient Civilizations"
+                progress={30}
+              />
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="mb-12 flex gap-4">
+            <Button
+              variant="hero"
+              size="lg"
+              className="flex-1"
+              onClick={() => setShowAnalytics(true)}
+            >
+              📊 Analytics
+            </Button>
+            <Button
+              variant="outline"
+              size="lg"
+              className="flex-1 border-orange-500/50 text-orange-500 hover:bg-orange-500/10"
+              onClick={() => setShowChallenge(true)}
+            >
+              🔥 Challenge
+            </Button>
+          </div>
         </div>
       </main>
 
@@ -540,6 +589,12 @@ const Dashboard = () => {
           onClick={() => setIsProfileOpen(false)}
         />
       )}
+
+      {/* Analytics Modal */}
+      <Analytics isOpen={showAnalytics} onClose={() => setShowAnalytics(false)} />
+
+      {/* Challenge Modal */}
+      <ChallengeModal isOpen={showChallenge} onClose={() => setShowChallenge(false)} />
     </div>
   );
 };

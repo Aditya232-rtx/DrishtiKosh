@@ -266,7 +266,7 @@ async def blind_interact(
                 transcription = str(stt_result)
                 print(f"DEBUG: STT Transcription (legacy): '{transcription}'")
             
-            if transcription and transcription not in ["STT Model not available", "Error transcribing audio", ""]:
+            if transcription and transcription not in ["STT Model not available", "Error transcribing audio", "", "STT Disabled"]:
                 user_input += f" {transcription}"
             else:
                 print("DEBUG: STT returned empty or unavailable")

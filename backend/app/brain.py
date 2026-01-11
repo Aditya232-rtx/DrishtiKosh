@@ -98,10 +98,16 @@ class Brain:
     def _get_task_instruction(task_type: str) -> str:
         instructions = {
             "explanation": """
-            **TASK: Personalised Lesson Generation**
-            -   Explain the requested topic.
-            -   **Crucial**: Use the user's 'Interests' to create analogies. (e.g., if interest is 'Football' and topic is 'Physics', explain Momentum using a striker kicking a ball).
-            -   Structure: Introduction -> Key Concepts -> Real-world Application -> Summary.
+            **TASK: Comprehensive Personalized Lesson Generation**
+            -   Provide an IN-DEPTH explanation of the requested topic with at least 10 detailed slides.
+            -   **Critical**: Use ACTUAL, FACTUALLY ACCURATE information about the topic first.
+            -   **Personalization**: After explaining the real concept, create vivid analogies using the user's interests to reinforce understanding.
+            -   **Example**: If topic is "Photosynthesis" and interest is "Gaming":
+                * First explain: "Photosynthesis is the process where plants convert light energy..."
+                * Then analogy: "Think of chloroplasts like power-up stations in a game..."
+            -   Structure each slide: Title -> Core Concept -> Real-world Facts -> Interest-based Analogy -> Key Takeaway.
+            -   Identify 4 key concepts suitable for visual representation.
+            -   Create at least 5 quiz questions.
             """,
             "video_analysis": """
             **TASK: Video/Content Analysis**

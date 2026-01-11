@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Request
 from pydantic import BaseModel
+import asyncio
 from typing import List, Optional
 from app.services.vertex import vertex_service
 from app.core.ratelimit import limiter
@@ -44,7 +45,8 @@ class QuizQuestion(BaseModel):
 class ExplainResponse(BaseModel):
     slides: List[Slide]
     quiz: List[QuizQuestion]
-    image: Optional[str] = None  # Base64 image
+    image: Optional[str] = None  # Deprecated (keeps backward compatibility)
+    images: List[str] = []       # New: List of 4 generated images
     session_id: Optional[str] = None  # Session ID for polling
 
 class VideoAnalysisRequest(BaseModel):
@@ -281,15 +283,22 @@ async def explain_topic(
         prompt += f"\n\nTopic: {body.topic}\n"
         prompt += "Create 3-5 slides and 2 quiz questions."
 
-    prompt += " Return strictly valid JSON (slides, quiz)."
+    prompt += " Return strictly valid JSON (slides, quiz, image_prompts)."
     prompt += " IMPORTANT: Do not use asterisks (*) in any text content."
     
-    # Force JSON format via prompt injection if not in system prompt
     prompt += """
-    Output strictly valid JSON with this structure:
+    Output strictly valid JSON with this structure. 
+    CRITICAL REQUIREMENTS:
+    1. "slides": MUST have at least 10 items.
+    2. "quiz": MUST have at least 5 questions.
+    3. "image_prompts": MUST have exactly 4 prompts.
+    4. "Do not use asterisks (*) in any text content."
+
+    Structure:
     {
-      "slides": [{"title": "...", "content": "..."}],
-      "quiz": [{"question": "...", "options": [], "correct": 0, "explanation": "Briefly explain why the correct answer is right."}]
+      "slides": [{"title": "...", "content": "..."}], 
+      "quiz": [{"question": "...", "options": [], "correct": 0, "explanation": "..."}],
+      "image_prompts": ["prompt1", "prompt2", "prompt3", "prompt4"]
     }
     """
     
@@ -326,22 +335,54 @@ async def explain_topic(
 
         response_text = await vertex_service.generate_text(prompt, video_url=video_uri, files=files)
         clean_text = response_text.replace("```json", "").replace("```", "").strip()
-        data = json.loads(clean_text)
         
-        # 3. Context-Aware Image Generation
-        # Generate a prompt for the image based on the topic and mode
-        image_prompt = f"Educational illustration of {body.topic}, {body.mode} friendly style, high quality."
-        if body.instruction:
-             image_prompt += f" Context: {body.instruction}"
-        if body.mode == "adhd":
-            image_prompt += " Vibrant, infographic style, minimal clutter."
+        try:
+            data = json.loads(clean_text)
+        except json.JSONDecodeError:
+            # Fallback for malformed JSON
+            print(f"❌ JSON Decode Error. Raw text: {clean_text[:100]}...")
+            raise HTTPException(status_code=500, detail="Failed to parse AI response")
         
-        # Personalize image style based on user interest
-        if body.user_id and body.user_id != "guest":
-            image_prompt = personalize_prompt(image_prompt, body.user_id, db, context="image")
+        # 3. Enhanced Image Generation (4 Images)
+        image_prompts = data.get("image_prompts", [])
         
-        image_b64 = await vertex_service.generate_image_base64(image_prompt)
-        data["image"] = image_b64
+        # Fallback if AI didn't return prompts
+        if not image_prompts:
+            base_prompt = f"Educational illustration of {body.topic}, {body.mode} style"
+            image_prompts = [
+                f"{base_prompt} - Concept 1 overview",
+                f"{base_prompt} - Detailed diagram",
+                f"{base_prompt} - Real world application",
+                f"{base_prompt} - creative analogy"
+            ]
+            
+        # Ensure we have at least 4 prompts
+        while len(image_prompts) < 4:
+            image_prompts.append(f"Educational illustration of {body.topic} - key concept {len(image_prompts)+1}")
+            
+        # Personalize prompts
+        final_image_prompts = []
+        for p in image_prompts[:4]: # Limit to 4
+            p_final = p
+            if body.mode == "adhd":
+                p_final += " Vibrant, infographic style, minimal clutter."
+            if body.user_id and body.user_id != "guest":
+                # Light personalization for style without full overhead
+                # We skip full personalize_prompt calls per image to save latency
+                pass 
+            final_image_prompts.append(p_final)
+
+        # Generate images in parallel
+        print(f"🎨 Generating {len(final_image_prompts)} images...")
+        image_tasks = [vertex_service.generate_image_base64(p) for p in final_image_prompts]
+        generated_images = await asyncio.gather(*image_tasks)
+        
+        # Filter failures (None)
+        valid_images = [img for img in generated_images if img]
+        
+        data["images"] = valid_images
+        # Set primary image for backward compatibility
+        data["image"] = valid_images[0] if valid_images else None
         
         # Save History to DB and get session_id
         session_id = save_history_entry_db(
@@ -365,11 +406,12 @@ async def explain_topic(
             )
             print(f"🚀 Background video generation started for session {session_id}")
         
-        # Return immediately with content (video generates in background)
+        # Return response
         return {
             "slides": data["slides"],
             "quiz": data["quiz"],
             "image": data["image"],
+            "images": data["images"],
             "session_id": session_id
         }
     except Exception as e:

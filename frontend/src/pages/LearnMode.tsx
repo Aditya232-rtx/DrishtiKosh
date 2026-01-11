@@ -28,6 +28,8 @@ import AICompanion from "@/components/AICompanion";
 import BioncText from "@/components/BionicText";
 import InteractiveAvatar from "@/components/InteractiveAvatar";
 import { ThemeToggleButton } from "@/components/ThemeToggleButton";
+import ImageCarousel from "@/components/ImageCarousel";
+import { Skeleton } from "@/components/lightswind/skeleton";
 
 const LearnMode = () => {
   const [searchParams] = useSearchParams();
@@ -62,7 +64,8 @@ const LearnMode = () => {
   ]);
   const [quizQuestions, setQuizQuestions] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [generatedImage, setGeneratedImage] = useState<string | null>(null);
+  const [generatedImage, setGeneratedImage] = useState<string | null>(null); // Kept for fallback
+  const [generatedImages, setGeneratedImages] = useState<string[]>([]); // New: Multiple images
 
   // Chat State
   const [chatHistory, setChatHistory] = useState<Array<{ role: 'user' | 'ai', content: string }>>([]);
@@ -95,7 +98,14 @@ const LearnMode = () => {
           if (data) {
             setSlides(data.slides || []);
             setQuizQuestions(data.quiz || []);
+            setQuizQuestions(data.quiz || []);
             if (data.image) setGeneratedImage(data.image);
+            if (data.images && data.images.length > 0) {
+              setGeneratedImages(data.images);
+            } else if (data.image) {
+              // Fallback for old sessions or single image
+              setGeneratedImages([data.image]);
+            }
             if (data.video_summary) setGeneratedVideo(data.video_summary);
             setTopic(res.data.title);
 
@@ -161,6 +171,13 @@ const LearnMode = () => {
       });
 
       if (res.data.image) setGeneratedImage(res.data.image);
+      if (res.data.images && res.data.images.length > 0) {
+        setGeneratedImages(res.data.images);
+      } else if (res.data.image) {
+        setGeneratedImages([res.data.image]);
+      } else {
+        setGeneratedImages([]);
+      }
 
       // NEW: Capture session_id and start polling for video
       if (res.data.session_id) {
@@ -191,47 +208,56 @@ const LearnMode = () => {
   };
 
 
-  // Poll for video completion
+  // Poll for video completion - OPTIMIZED for faster detection
   useEffect(() => {
     if (!isPollingVideo || !sessionId) return;
 
-    console.log("🔄 Polling for video...");
+    console.log("🔄 Starting video polling for session:", sessionId);
 
     const pollForVideo = async () => {
       try {
         const res = await api.get(`/api/learn/session/${sessionId}`);
-        console.log("Poll result:", res.data); // Debug
 
-        const sessionStatus = res.data.data?.status;
-        const videoData = res.data.data?.content_data?.video_summary;
-        const videoStatus = res.data.data?.data?.video_status; // Check inside data.data or data.content_data depending on API
+        const contentData = res.data.data;
+        const videoData = contentData?.video_summary;
+        const videoStatus = contentData?.video_status;
 
-        if (videoData) {
+        console.log(`📊 Poll status: video_status=${videoStatus}, has_video=${!!videoData}`);
+
+        // Check if video is completed (backend logs "✅ Video stored in session")
+        if (videoStatus === "completed" && videoData) {
           console.log("✅ Video ready! Stopping poll.");
           setGeneratedVideo(videoData);
           setIsPollingVideo(false);
-        } else if (res.data.data?.content_data?.video_status === "failed") {
-          console.log("⏹️ Video extraction failed/disabled. Stopping poll.");
-          setIsPollingVideo(false);
-        } else if (sessionStatus === "failed") {
-          // Fallback if status logic changes back
-          console.log(`⏹️ Polling stopped. Status: ${sessionStatus}`);
-          setIsPollingVideo(false);
+          return;
         }
+
+        // Check if video generation failed
+        if (videoStatus === "failed") {
+          console.log("⏹️ Video generation failed. Stopping poll.");
+          setIsPollingVideo(false);
+          return;
+        }
+
+        // Still processing
+        console.log("⏳ Video still processing...");
       } catch (error) {
-        console.error("Polling error:", error);
-        setIsPollingVideo(false); // Stop on 404/500
+        console.error("❌ Polling error:", error);
+        setIsPollingVideo(false); // Stop on error
       }
     };
 
     // Initial immediate poll
     pollForVideo();
 
-    // Poll every 30 seconds
-    const interval = setInterval(pollForVideo, 30000);
+    // Poll every 3 seconds for faster response (reduced from 30s)
+    const interval = setInterval(pollForVideo, 3000);
 
     // Cleanup on unmount or when polling stops
-    return () => clearInterval(interval);
+    return () => {
+      console.log("🛑 Stopping video polling");
+      clearInterval(interval);
+    };
   }, [isPollingVideo, sessionId]);
 
 
@@ -401,7 +427,15 @@ const LearnMode = () => {
             <div className="lg:col-span-7 flex flex-col gap-6">
 
               {/* ... Video/Image Display (Unchanged) ... */}
-              {youtubeUrl ? (
+              {isLoading ? (
+                <div className="aspect-video bg-card rounded-3xl overflow-hidden shadow-lg border border-border relative">
+                  <Skeleton className="w-full h-full" shimmer />
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
+                    <Skeleton variant="circle" className="w-20 h-20" shimmer />
+                    <Skeleton className="w-48 h-6 rounded-full" shimmer />
+                  </div>
+                </div>
+              ) : youtubeUrl ? (
                 <div className="aspect-video bg-black rounded-3xl overflow-hidden shadow-lg relative z-0">
                   <iframe
                     width="100%"
@@ -414,40 +448,14 @@ const LearnMode = () => {
                     className="absolute inset-0 w-full h-full"
                   ></iframe>
                 </div>
-              ) : showVideo && generatedVideo ? (
-                // Video Player
-                <div className="aspect-video bg-black rounded-3xl overflow-hidden shadow-lg relative">
-                  <video
-                    controls
-                    autoPlay
-                    className="w-full h-full object-contain bg-black"
-                    src={`data:video/mp4;base64,${generatedVideo}`}
-                  >
-                    Your browser doesn't support video playback.
-                  </video>
-                  <button
-                    onClick={() => setShowVideo(false)}
-                    className="absolute top-4 right-4 bg-black/60 hover:bg-black/80 backdrop-blur-sm text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-                  >
-                    ← Back to Image
-                  </button>
-                </div>
               ) : (
-                <div className="bg-card/50 backdrop-blur-sm rounded-3xl overflow-hidden border border-border/50 shadow-xl shadow-primary/5 flex-shrink-0 relative group aspect-video">
-                  <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/10 via-purple-500/10 to-pink-500/10 flex flex-col items-center justify-center p-8 overflow-hidden relative">
-                    {generatedImage ? (
-                      <img src={`data:image/png;base64,${generatedImage}`} alt="AI Visual" className="w-full h-full object-cover transition-transform hover:scale-105 duration-1000" />
-                    ) : (
-                      <div className="flex flex-col items-center text-center animate-pulse">
-                        <div className="w-20 h-20 bg-primary/20 rounded-full flex items-center justify-center mb-4">
-                          <ImageIcon className="w-10 h-10 text-primary" />
-                        </div>
-                        <p className="text-lg font-semibold text-foreground">Generating Visuals...</p>
-                        <p className="text-sm text-muted-foreground mt-1">Our AI is painting a picture for you</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
+                <ImageCarousel
+                  images={generatedImages}
+                  generatedVideo={generatedVideo}
+                  showVideo={showVideo}
+                  setShowVideo={setShowVideo}
+                  isPollingVideo={isPollingVideo}
+                />
               )}
 
               {/* 2. Interactive Doubt Chat */}
@@ -557,17 +565,45 @@ const LearnMode = () => {
                   <span className="font-semibold text-foreground/80 group-hover:text-purple-700">Open Notebook</span>
                 </Button>
 
-                <Button
-                  variant="outline"
-                  className="flex-1 h-14 rounded-2xl flex items-center justify-center gap-3 border-2 border-transparent hover:border-blue-500/20 hover:bg-blue-500/5 transition-all group"
+                <button
                   onClick={() => setShowVideo(true)}
-                  disabled={!generatedVideo}
+                  disabled={!generatedVideo || isPollingVideo}
+                  className={`group flex items-center gap-3 w-full px-4 py-3 rounded-xl transition-all duration-300 ${generatedVideo && !isPollingVideo
+                    ? "bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 text-white shadow-lg hover:shadow-xl hover:scale-[1.02]"
+                    : isPollingVideo
+                      ? "bg-gray-100 dark:bg-gray-800 text-gray-400 cursor-wait"
+                      : "bg-gray-100 dark:bg-gray-800 text-gray-400 cursor-not-allowed"
+                    }`}
+                  aria-label={
+                    isPollingVideo
+                      ? "Video is being generated, please wait"
+                      : generatedVideo
+                        ? "Play video summary"
+                        : "Video summary not available"
+                  }
                 >
-                  <div className="p-2 bg-blue-500/10 rounded-lg group-hover:bg-blue-500/20 text-blue-600 transition-colors">
-                    <Video className="w-5 h-5" />
-                  </div>
-                  <span className="font-semibold text-foreground/80 group-hover:text-blue-700">Video Summary</span>
-                </Button>
+                  {isPollingVideo ? (
+                    <>
+                      <div className="w-5 h-5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+                      <div className="text-left flex-1">
+                        <span className="font-semibold text-gray-500">Generating Video...</span>
+                        <p className="text-xs text-gray-400 mt-0.5">Checking every 3s</p>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <Video className={`w-5 h-5 transition-transform ${generatedVideo ? "group-hover:scale-110" : ""}`} />
+                      <div className="text-left flex-1">
+                        <span className={`font-semibold ${generatedVideo ? "text-white" : "text-gray-400"}`}>
+                          Video Summary
+                        </span>
+                        {generatedVideo && (
+                          <p className="text-xs text-white/80 mt-0.5">Click to watch</p>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </button>
               </div>
 
               {/* ... Bottom Section (Avatar + Insight) ... (Preserved) */}
@@ -627,36 +663,69 @@ const LearnMode = () => {
             <div className="lg:col-span-5 flex flex-col gap-6 h-full overflow-hidden">
               {/* ... Slides Card ... */}
               <div className="bg-card rounded-3xl p-6 border border-border shadow-md flex-1 overflow-y-auto flex flex-col custom-scrollbar relative">
-                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary to-transparent opacity-50" />
+                {isLoading ? (
+                  <div className="flex flex-col h-full gap-6">
+                    {/* Header Skeleton */}
+                    <div className="flex justify-between items-center border-b border-border/40 pb-4">
+                      <Skeleton className="h-8 w-2/3 rounded-lg" shimmer />
+                      <Skeleton className="h-6 w-16 rounded-md" shimmer />
+                    </div>
 
-                <div className="flex items-center justify-between mb-6 sticky top-0 bg-card z-10 py-2 border-b border-border/40">
-                  <h2 className="text-xl font-bold text-foreground line-clamp-1">{slides[currentSlide].title}</h2>
-                  <span className="text-xs font-bold text-muted-foreground bg-secondary px-2 py-1 rounded-md border border-border">
-                    {currentSlide + 1} / {slides.length}
-                  </span>
-                </div>
+                    {/* Content Skeleton */}
+                    <div className="space-y-4 flex-1">
+                      <Skeleton className="h-4 w-full" shimmer />
+                      <Skeleton className="h-4 w-full" shimmer />
+                      <Skeleton className="h-4 w-5/6" shimmer />
+                      <Skeleton className="h-32 w-full rounded-xl mt-4" shimmer />
+                      <Skeleton className="h-4 w-full" shimmer />
+                      <Skeleton className="h-4 w-4/5" shimmer />
+                    </div>
 
-                <div className="prose dark:prose-invert prose-p:leading-relaxed prose-headings:font-bold max-w-none flex-1">
-                  <BioncText text={slides[currentSlide].content} enabled={mode === "adhd"} />
-                </div>
-
-                {/* Navigation at Bottom of Card */}
-                <div className="flex items-center justify-between mt-6 pt-4 border-t border-border/50">
-                  <Button variant="ghost" onClick={handlePrevSlide} disabled={currentSlide === 0} className="hover:bg-primary/5 text-muted-foreground hover:text-primary">
-                    <ChevronLeft className="w-5 h-5 mr-1" /> Back
-                  </Button>
-
-                  {/* Dots Indicator */}
-                  <div className="flex gap-1.5">
-                    {slides.map((_, i) => (
-                      <div key={i} className={`h-1.5 rounded-full transition-all duration-300 ${i === currentSlide ? "w-6 bg-primary" : "w-1.5 bg-muted-foreground/30"}`} />
-                    ))}
+                    {/* Footer Navigation Skeleton */}
+                    <div className="flex justify-between items-center pt-4 border-t border-border/50">
+                      <Skeleton className="h-10 w-24 rounded-lg" shimmer />
+                      <div className="flex gap-2">
+                        <Skeleton variant="circle" className="w-2 h-2" />
+                        <Skeleton variant="circle" className="w-2 h-2" />
+                        <Skeleton variant="circle" className="w-2 h-2" />
+                      </div>
+                      <Skeleton className="h-10 w-24 rounded-lg" shimmer />
+                    </div>
                   </div>
+                ) : (
+                  <>
+                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary to-transparent opacity-50" />
 
-                  <Button variant="default" onClick={handleNextSlide} disabled={currentSlide === slides.length - 1} className="pl-6 pr-4 rounded-xl shadow-lg shadow-primary/20">
-                    Next <ChevronRight className="w-5 h-5 ml-1" />
-                  </Button>
-                </div>
+                    <div className="flex items-center justify-between mb-6 sticky top-0 bg-card z-10 py-2 border-b border-border/40">
+                      <h2 className="text-xl font-bold text-foreground line-clamp-1">{slides[currentSlide].title}</h2>
+                      <span className="text-xs font-bold text-muted-foreground bg-secondary px-2 py-1 rounded-md border border-border">
+                        {currentSlide + 1} / {slides.length}
+                      </span>
+                    </div>
+
+                    <div className="prose dark:prose-invert prose-p:leading-relaxed prose-headings:font-bold max-w-none flex-1">
+                      <BioncText text={slides[currentSlide].content} enabled={mode === "adhd"} />
+                    </div>
+
+                    {/* Navigation at Bottom of Card */}
+                    <div className="flex items-center justify-between mt-6 pt-4 border-t border-border/50">
+                      <Button variant="ghost" onClick={handlePrevSlide} disabled={currentSlide === 0} className="hover:bg-primary/5 text-muted-foreground hover:text-primary">
+                        <ChevronLeft className="w-5 h-5 mr-1" /> Back
+                      </Button>
+
+                      {/* Dots Indicator */}
+                      <div className="flex gap-1.5">
+                        {slides.map((_, i) => (
+                          <div key={i} className={`h-1.5 rounded-full transition-all duration-300 ${i === currentSlide ? "w-6 bg-primary" : "w-1.5 bg-muted-foreground/30"}`} />
+                        ))}
+                      </div>
+
+                      <Button variant="default" onClick={handleNextSlide} disabled={currentSlide === slides.length - 1} className="pl-6 pr-4 rounded-xl shadow-lg shadow-primary/20">
+                        Next <ChevronRight className="w-5 h-5 ml-1" />
+                      </Button>
+                    </div>
+                  </>
+                )}
               </div>
 
               {/* Quiz Card - Fixed Key for Re-render */}

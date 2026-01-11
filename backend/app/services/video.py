@@ -89,16 +89,42 @@ Style: Clean, professional, {user_interest}-oriented educational content with te
             print(f"  Polling for completion (this may take 30-90 seconds)...")
             
             # Poll for completion (async)
-            max_wait = 120  # 2 minutes max
+            # The operation object from google-genai behaves like a Pydantic model
+            max_wait = 300  # 5 minutes max
             elapsed = 0
-            while not operation.done and elapsed < max_wait:
-                await asyncio.sleep(5)
-                elapsed += 5
-                operation = await asyncio.to_thread(self.client.operations.get, operation)
-                print(f"  ... still generating ({elapsed}s elapsed)")
+            poll_interval = 5
             
-            if not operation.done:
-                print("⚠️  Video generation timed out after 2 minutes")
+            while elapsed < max_wait:
+                # Check status
+                is_done = False
+                if hasattr(operation, 'done'):
+                    is_done = operation.done() if callable(operation.done) else operation.done
+                
+                if is_done:
+                    print(f"✅ Video generation complete ({elapsed}s elapsed)")
+                    break
+                    
+                await asyncio.sleep(poll_interval)
+                elapsed += poll_interval
+                
+                if elapsed % 15 == 0:
+                    print(f"  ... still generating video ({elapsed}s elapsed)")
+                
+                # Refresh operation status
+                try:
+                    # Pass the operation object itself
+                    operation = await asyncio.to_thread(self.client.operations.get, operation)
+                except Exception as e:
+                    if elapsed % 15 == 0:
+                        print(f"⚠️ Error refreshing operation: {e}")
+            
+            # Final check
+            final_done = False
+            if hasattr(operation, 'done'):
+                final_done = operation.done() if callable(operation.done) else operation.done
+                
+            if not final_done:
+                print(f"⚠️  Video generation timed out after {max_wait} seconds")
                 return None
             
             # Check for errors

@@ -1,0 +1,14 @@
+# Additional dependencies for Enhanced Audio Processing with Emotion Recognition
+
+# Audio Processing
+librosa>=0.10.0
+soundfile>=0.12.1
+scipy>=1.10.0
+
+# AI/ML for Emotion Recognition
+transformers>=4.35.0
+torch>=2.0.0  # Required by transformers
+torchaudio>=2.0.0  # Required for audio processing in transformers
+
+# Audio Download (already in requirements)
+# yt-dlp>=2023.0.0

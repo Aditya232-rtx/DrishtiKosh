@@ -4,11 +4,10 @@ import { auth } from './auth';
 const API_BASE_URL = 'http://localhost:8001';
 
 const api = axios.create({
-    baseURL: API_BASE_URL,
-    // NOTE: Don't set default Content-Type here
-    // Let axios auto-detect based on request body:
-    // - FormData -> multipart/form-data  
-    // - Objects -> application/json
+    baseURL: "http://localhost:8001",
+    headers: {
+        "Content-Type": "application/json",
+    },
 });
 
 // Add auth token to all requests

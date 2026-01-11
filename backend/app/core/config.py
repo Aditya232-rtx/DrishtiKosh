@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     PROJECT_ID: Optional[str] = None
     LOCATION: str = "us-central1"
     
+    # 3D Generation
+    MESHY_API_KEY: Optional[str] = None
+    
     # JWT Auth
     SECRET_KEY: str  # Must be set in .env
     ALGORITHM: str = "HS256"

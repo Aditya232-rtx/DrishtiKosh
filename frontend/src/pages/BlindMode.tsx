@@ -120,10 +120,15 @@ const BlindMode = () => {
 
     // CHECK FOR SENTINEL
     if (typeof item === 'string' && item === "END_OF_TURN") {
-      console.log("🛑 End-of-turn sentinel reached. Auto-closing session.");
+      console.log("✅ End-of-turn sentinel reached. Returning to LISTENING mode.");
       isPlayingRef.current = false;
       setIsAiSpeaking(false);
-      stopLiveSession("Auto-close (Sentinel Reached)");
+      setStatus("LISTENING");
+      announce("Listening");
+
+      if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN && !isUserSpeakingRef.current) {
+        startMic();
+      }
       return;
     }
 
@@ -270,6 +275,14 @@ const BlindMode = () => {
               if (!isPlayingRef.current && !isUserSpeakingRef.current) {
                 playNextChunk();
               }
+
+              // If no audio arrived at all, immediately switch back to listening
+              if (!isPlayingRef.current && audioQueueRef.current.length === 0) {
+                setIsAiSpeaking(false);
+                setStatus("LISTENING");
+                announce("Listening");
+                startMic();
+              }
             }
           } catch (e) {
             // Non-JSON message, ignore
@@ -329,6 +342,13 @@ const BlindMode = () => {
 
   const startMic = async () => {
     try {
+      if (isUserSpeakingRef.current) {
+        return;
+      }
+      if (!websocketRef.current || websocketRef.current.readyState !== WebSocket.OPEN) {
+        console.warn("Cannot start mic: websocket is not open");
+        return;
+      }
       if (!audioContextRef.current) return;
 
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -394,8 +414,14 @@ const BlindMode = () => {
         if (!isConnected) {
           startLiveSession();
         } else {
-          // If already connected and speaking (listening to user), Space stops listening
-          finishTurn();
+          // Toggle speaking state while connected
+          if (isSpeaking) {
+            finishTurn();
+          } else if (!isAiSpeaking) {
+            setStatus("LISTENING");
+            announce("Listening");
+            startMic();
+          }
         }
       } else if (e.code === "Escape" && isConnected) {
         stopLiveSession("Escape Key");
@@ -403,7 +429,7 @@ const BlindMode = () => {
     };
     window.addEventListener("keydown", handleKeyPress);
     return () => window.removeEventListener("keydown", handleKeyPress);
-  }, [isConnected, isSpeaking]); // Added isSpeaking dependency
+  }, [isConnected, isSpeaking, isAiSpeaking]);
 
   // Cleanup
   useEffect(() => {

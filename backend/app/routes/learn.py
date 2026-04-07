@@ -5,6 +5,7 @@ from pydantic import BaseModel
 import asyncio
 from typing import List, Optional
 from app.services.vertex import vertex_service
+from app.services.ollama import ollama_service
 from app.core.ratelimit import limiter
 import json
 import logging
@@ -150,7 +151,7 @@ async def learn_chat(req: ChatRequest, db: Session = Depends(get_db)):
              files.append({"uri": req.file_uri, "mime_type": req.file_mime})
              prompt += "\n[Context: The user has uploaded a file. Use the attached file to answer the doubt.]"
 
-        response_text = await vertex_service.generate_text(prompt, files=files)
+        response_text = await ollama_service.generate_text(prompt, files=files)
         
         return {"response": response_text}
 
@@ -179,6 +180,24 @@ def save_history_entry_db(db: Session, title: str, preview: str, type: str, data
         logger.error(f"Error saving history to DB: {e}")
         db.rollback()
         return None
+
+@router.get("/learn/session/{session_id}")
+async def get_session_details(session_id: str, db: Session = Depends(get_db)):
+    try:
+        session = db.query(LearningSession).filter(LearningSession.id == uuid.UUID(session_id)).first()
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        return {
+            "id": str(session.id),
+            "title": session.title,
+            "type": session.type.value,
+            "data": session.content_data,
+            "created_at": session.created_at.isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error fetching session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/learn/history")
 async def get_history(user_id: str = "guest", db: Session = Depends(get_db)):
@@ -367,7 +386,7 @@ async def explain_topic(
              files.append({"uri": body.file_uri, "mime_type": body.file_mime})
              prompt += "\n\nCRITICAL INSTRUCTION: The user has provided an attached file. YOU MUST BASE YOUR EXPLANATION, SLIDES, AND QUIZ SOLELY AND EXCLUSIVELY ON THE CONTENT OF THIS FILE. Do not use external knowledge unless the file is unreadable. If the file contradicts general knowledge, follow the file."
 
-        response_text = await vertex_service.generate_text(prompt, video_url=video_uri, files=files)
+        response_text = await ollama_service.generate_text(prompt, video_url=video_uri, files=files)
         clean_text = response_text.replace("```json", "").replace("```", "").strip()
         
         try:
@@ -481,7 +500,7 @@ async def generate_flowchart(request: FlowchartRequest):
     """
     
     try:
-        response_text = await vertex_service.generate_text(prompt)
+        response_text = await ollama_service.generate_text(prompt)
         match = re.search(r"(graph|flowchart)\s+[a-zA-Z0-9]+", response_text, re.IGNORECASE)
         
         if match:
@@ -585,7 +604,16 @@ async def log_frontend_message(body: LogRequest):
 
 @router.post("/learn/flashcards")
 async def generate_flashcards(request: FlashcardRequest, db: Session = Depends(get_db)):
-    from app.services.vertex import vertex_service
+    def _fallback_flashcards(topic: str):
+        return [
+            {"front": f"What is {topic}?", "back": f"{topic} is a core concept in classical mechanics used to explain force interactions."},
+            {"front": "State Newton's Third Law", "back": "For every action, there is an equal and opposite reaction."},
+            {"front": "Do action and reaction act on the same object?", "back": "No. They act on different objects."},
+            {"front": "Are action and reaction forces equal in size?", "back": "Yes. They are equal in magnitude and opposite in direction."},
+            {"front": "Football example", "back": "When you kick the ball, your foot pushes the ball and the ball pushes your foot back."},
+            {"front": "How is it linked to Newton's First Law?", "back": "Third Law explains force pairs; First Law explains motion when net force is zero (inertia)."},
+        ]
+
     prompt = f"Create 6 educational flashcards about '{request.topic}'. "
     prompt += "Each flashcard should have a 'front' (question/term) and 'back' (answer/definition). "
     prompt += """
@@ -596,13 +624,38 @@ async def generate_flashcards(request: FlashcardRequest, db: Session = Depends(g
     ]
     """
     try:
-        response_text = await vertex_service.generate_text(prompt)
+        response_text = await ollama_service.generate_text(prompt)
         clean_text = response_text.replace("```json", "").replace("```", "").strip()
-        data = json.loads(clean_text)
+        if not clean_text:
+            return _fallback_flashcards(request.topic)
+        try:
+            data = json.loads(clean_text)
+        except json.JSONDecodeError:
+            start = clean_text.find("[")
+            end = clean_text.rfind("]") + 1
+            if start != -1 and end > start:
+                candidate = clean_text[start:end]
+                try:
+                    data = json.loads(candidate)
+                except json.JSONDecodeError:
+                    data = None
+            else:
+                data = None
+
+            if data is None:
+                # Fallback: extract front/back pairs from loosely formatted text
+                pairs = re.findall(
+                    r'"front"\s*:\s*"(.*?)"[\s\S]*?"back"\s*:\s*"(.*?)"',
+                    clean_text,
+                    flags=re.IGNORECASE,
+                )
+                if not pairs:
+                    return _fallback_flashcards(request.topic)
+                data = [{"front": f.strip(), "back": b.strip()} for f, b in pairs]
         return data
     except Exception as e:
         logger.error(f"Error generating flashcards: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return _fallback_flashcards(request.topic)
 
 @router.post("/learn/3d_model")
 async def generate_3d_model(request: ThreeDModelRequest):
@@ -627,7 +680,6 @@ async def analyze_video_emotional(
     db: Session = Depends(get_db)
 ):
     from app.brain import brain
-    from app.services.vertex import vertex_service
     import re
     
     try:
@@ -659,9 +711,21 @@ Strict JSON output:
 }}
 """
         logger.info(f"Analyzing video content: {body.url}")
-        response_text = await vertex_service.analyze_video(body.url, system_prompt + "\n\n" + user_prompt)
+        response_text = await ollama_service.generate_text(system_prompt + "\n\n" + user_prompt + f"\n\nVIDEO URL: {body.url}")
         clean_text = response_text.replace("```json", "").replace("```", "").strip()
-        data = json.loads(clean_text)
+        
+        # Robust JSON Extraction
+        try:
+            start = clean_text.find("{")
+            end = clean_text.rfind("}") + 1
+            if start != -1 and end != 0:
+                clean_text = clean_text[start:end]
+            data = json.loads(clean_text)
+        except json.JSONDecodeError as je:
+            logger.error(f"JSON Parse Error: {je}")
+            logger.error(f"Raw Text: {clean_text}")
+            # Fallback/Retry logic could go here, or return error
+            raise HTTPException(status_code=500, detail="Failed to parse AI response. Please try again.")
         
         transcript = [EmotionalSegment(**seg) for seg in data.get("transcript", [])]
         flashcards = [Flashcard(**card) for card in data.get("flashcards", [])]

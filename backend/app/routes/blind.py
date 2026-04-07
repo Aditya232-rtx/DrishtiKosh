@@ -1,9 +1,11 @@
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
+from starlette.websockets import WebSocketState
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.services.audio import audio_service
 from app.services.vertex import vertex_service
+from app.services.ollama import ollama_service
 from app.models.blind_conversation import BlindConversation, BlindMessage, ConversationStatus, MessageRole
 from app.models.learning_session import LearningSession, SessionType
 from app.models.learning_session import LearningSession, SessionType
@@ -25,15 +27,22 @@ router = APIRouter()
 from app.core.config import settings
 
 # --- Gemini Live Configuration ---
-# User requested Vertex AI instead of API Key
 PROJECT_ID = settings.PROJECT_ID
 LOCATION = settings.LOCATION
+GEMINI_API_KEY = settings.GEMINI_API_KEY or settings.GOOGLE_API_KEY
 
-if not PROJECT_ID:
-    print("❌ CRITICAL ERROR: PROJECT_ID is missing for Vertex AI!")
-    print("👉 Please add PROJECT_ID=your-project-id to your backend/.env file")
-    client = None
-else:
+if GEMINI_API_KEY:
+    print("✅ Gemini Live: Using API key mode")
+    try:
+        client = genai.Client(
+            api_key=GEMINI_API_KEY,
+            http_options=HttpOptions(api_version="v1beta")
+        )
+    except Exception as e:
+        print(f"❌ Failed to initialize Gemini API-key client: {e}")
+        client = None
+    MODEL = "models/gemini-3.1-flash-live-preview"
+elif PROJECT_ID:
     print(f"✅ Gemini Live: Using Vertex AI (Project: {PROJECT_ID}, Location: {LOCATION})")
     try:
         client = genai.Client(
@@ -45,9 +54,11 @@ else:
     except Exception as e:
         print(f"❌ Failed to initialize Vertex AI Client: {e}")
         client = None
-
-# Using the correct model ID for Vertex AI Live Preview
-MODEL = "gemini-2.0-flash-live-preview-04-09"
+    MODEL = "gemini-2.0-flash-live-preview-04-09"
+else:
+    print("❌ CRITICAL ERROR: No Gemini API key or Vertex project configuration found.")
+    client = None
+    MODEL = "gemini-2.0-flash-live-001"
 
 @router.websocket("/blind/live")
 async def blind_live_endpoint(websocket: WebSocket):
@@ -76,9 +87,7 @@ async def blind_live_endpoint(websocket: WebSocket):
 
         # Initialize Gemini Live Session
         config = {
-            "generation_config": {
-                "response_modalities": ["AUDIO"]
-            },
+            "response_modalities": ["AUDIO"],
             "system_instruction": {
                 "parts": [{"text": system_instruction_text}]
             }
@@ -92,7 +101,12 @@ async def blind_live_endpoint(websocket: WebSocket):
             
             async def send_to_gemini(data, end_of_turn=False):
                 try:
-                     await session.send(input={"data": data, "mime_type": "audio/pcm"}, end_of_turn=end_of_turn)
+                     if end_of_turn:
+                         await session.send_realtime_input(audio_stream_end=True)
+                     else:
+                         await session.send_realtime_input(
+                             audio={"data": data, "mime_type": "audio/pcm"}
+                         )
                 except Exception as e:
                     print(f"❌ Error sending to Gemini: {e}")
 
@@ -101,6 +115,9 @@ async def blind_live_endpoint(websocket: WebSocket):
                 try:
                     while True:
                         message = await websocket.receive()
+                        if message.get("type") == "websocket.disconnect":
+                            print("⚠️ Client disconnected")
+                            break
                         
                         if "bytes" in message:
                             # Stream user audio immediately
@@ -115,6 +132,8 @@ async def blind_live_endpoint(websocket: WebSocket):
                                  
                 except WebSocketDisconnect:
                     print("⚠️ Client disconnected")
+                except asyncio.CancelledError:
+                    return
                 except Exception as e:
                     print(f"❌ Error in receive_from_client: {e}")
 
@@ -122,34 +141,56 @@ async def blind_live_endpoint(websocket: WebSocket):
             async def receive_from_gemini():
                 try:
                     async for response in session.receive():
+                        if websocket.client_state != WebSocketState.CONNECTED:
+                            break
                         if response.server_content:
                             if response.server_content.model_turn:
                                 for part in response.server_content.model_turn.parts:
                                     # Stream TEXT immediately
                                     if part.text:
                                         msg = json.dumps({"type": "text", "role": "ai", "content": part.text})
-                                        await websocket.send_text(msg)
+                                        if websocket.client_state == WebSocketState.CONNECTED:
+                                            await websocket.send_text(msg)
 
                                     # Stream AUDIO immediately (critical for low latency)
                                     if part.inline_data:
-                                        await websocket.send_bytes(part.inline_data.data)
+                                        if websocket.client_state == WebSocketState.CONNECTED:
+                                            await websocket.send_bytes(part.inline_data.data)
                             
                             if response.server_content.turn_complete:
                                 print("🏁 Gemini Turn Complete")
-                                await websocket.send_text(json.dumps({"type": "turn_complete"}))
+                                if websocket.client_state == WebSocketState.CONNECTED:
+                                    await websocket.send_text(json.dumps({"type": "turn_complete"}))
 
+                except asyncio.CancelledError:
+                    return
                 except Exception as e:
                     print(f"❌ Error in receive_from_gemini: {e}")
 
-            # Run tasks concurrently
-            await asyncio.gather(receive_from_client(), receive_from_gemini())
+            # Run tasks concurrently and stop cleanly when either side ends
+            client_task = asyncio.create_task(receive_from_client())
+            gemini_task = asyncio.create_task(receive_from_gemini())
+            done, pending = await asyncio.wait(
+                {client_task, gemini_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+
+            for task in done:
+                exc = task.exception()
+                if exc:
+                    print(f"❌ Blind live task ended with error: {exc}")
     
     except Exception as e:
         print(f"❌ WebSocket Global Error: {e}")
     finally:
         db.close()
         try:
-            await websocket.close()
+            if websocket.client_state == WebSocketState.CONNECTED:
+                await websocket.close()
         except Exception:
             pass
  
@@ -305,7 +346,7 @@ async def blind_interact(
         ai_text = "I'm sorry, I didn't catch that. Could you please speak again?"
     else:
         try:
-            ai_text = await vertex_service.generate_text(full_prompt)
+            ai_text = await ollama_service.generate_text(full_prompt)
         except Exception as e:
             ai_text = "I'm having trouble connecting to my brain right now. Please try again."
             print(f"Generation Error: {e}")

@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from typing import Optional
+from pydantic import Field, AliasChoices
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "DrishtiKosh Backend"
@@ -12,9 +13,17 @@ class Settings(BaseSettings):
     PROJECT_ID: Optional[str] = None
     LOCATION: str = "us-central1"
     GOOGLE_API_KEY: Optional[str] = None
+    GEMINI_API_KEY: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("GEMINI_API_KEY", "geminikey"),
+    )
     
     # 3D Generation
     MESHY_API_KEY: Optional[str] = None
+
+    # Ollama (Local LLM)
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_MODEL: str = "qwen3:4b"
     
     # JWT Auth
     SECRET_KEY: str  # Must be set in .env
